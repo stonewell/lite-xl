@@ -86,10 +86,10 @@ elif get_option('bundle') and host_machine.system() == 'darwin'
     lite_datadir = 'Contents' / 'Resources'
     lpm_userdir = 'Resources'
     lpm_install_dir = 'Contents'
-    conf_data.set(
-        'CURRENT_YEAR',
-        run_command('date', '+%Y', capture: true).stdout().strip()
-    )
+        conf_data.set(
+            'CURRENT_YEAR',
+            run_command('date', '+%Y', check: false, capture: true).stdout().strip()
+        )
     install_data('resources' / 'icons' / 'icon.icns', install_dir : 'Contents' / 'Resources')
     configure_file(
         input : 'resources' / 'macos' / 'Info.plist.in',
@@ -156,7 +156,7 @@ else
             output : 'com.lite_xl.LiteXL.metainfo.xml',
             configuration : conf_data,
             install : true,
-            install_dir : 'share/metainfo'
+            install_dir : get_option('datadir') / 'metainfo'
         )
     endif
 endif
@@ -166,14 +166,14 @@ install_data('licenses' / 'licenses.md', install_dir : lite_docdir)
 install_subdir('docs' / 'api' , install_dir : lite_datadir, strip_directory: true)
 install_subdir('data' / 'core' , install_dir : lite_datadir, exclude_files : 'start.lua')
 foreach data_module : ['fonts', 'plugins', 'colors']
-    install_subdir(join_paths('data', data_module), install_dir : lite_datadir)
+    install_subdir('data' / data_module, install_dir : lite_datadir)
 endforeach
 
 configure_file(
     input : 'data' / 'core' / 'start.lua',
     output : 'start.lua',
     configuration : conf_data,
-    install_dir : join_paths(lite_datadir, 'core'),
+    install_dir : lite_datadir / 'core',
 )
 
 if not get_option('source-only')

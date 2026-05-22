@@ -11,8 +11,14 @@ static int query_surface_scale(RenWindow *ren) {
   SDL_GetWindowSize(ren->window, &w_points, &h_points);
   /* We consider that the ratio pixel/point will always be an integer and
      it is the same along the x and the y axis. */
-  assert(w_pixels % w_points == 0 && h_pixels % h_points == 0 && w_pixels / w_points == h_pixels / h_points);
-  return w_pixels / w_points;
+  if (h_points == 0) h_points = 1;
+  if (h_pixels == 0) h_pixels = 1;
+  if (w_points == 0) w_points = 1;
+  if (w_pixels == 0) w_pixels = 1;
+
+  int scale = w_pixels / w_points;
+
+  return scale ? scale : 1;
 }
 
 static void setup_renderer(RenWindow *ren, int w, int h) {
@@ -104,6 +110,11 @@ void renwin_resize_surface(RenWindow *ren) {
 void renwin_update_scale(RenWindow *ren) {
 #ifndef LITE_USE_SDL_RENDERER
   SDL_Surface *surface = SDL_GetWindowSurface(ren->window);
+  if (!surface)
+  {
+    fprintf(stderr, "Error getting window surface: %s", SDL_GetError());
+    return;
+  }
   int window_w = surface->w, window_h = surface->h;
   SDL_GetWindowSize(ren->window, &window_w, &window_h);
   ren->scale_x = (float)surface->w / window_w;

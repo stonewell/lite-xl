@@ -70,6 +70,42 @@ local function key_to_stroke(key)
 end
 
 
+---Normalizes a full key sequence (one or more space-separated strokes).
+---@param sequence string
+---@return string
+local function normalize_sequence(sequence)
+  local strokes = {}
+  for stroke in sequence:gmatch("[^ ]+") do
+    table.insert(strokes, normalize_stroke(stroke))
+  end
+  return table.concat(strokes, " ")
+end
+
+
+---Set of all single-stroke prefixes that begin a multi-stroke sequence.
+---@type table<string, boolean>
+local prefix_set = {}
+
+---Rebuilds prefix_set from keymap.map; called after any map mutation.
+local function rebuild_prefix_set()
+  prefix_set = {}
+  for seq in pairs(keymap.map) do
+    local parts = {}
+    for p in seq:gmatch("[^ ]+") do
+      table.insert(parts, p)
+    end
+    for i = 1, #parts - 1 do
+      prefix_set[table.concat(parts, " ", 1, i)] = true
+    end
+  end
+end
+
+
+---The currently accumulated prefix stroke(s), or nil when no prefix is pending.
+---@type string|nil
+keymap.pending_prefix = nil
+
+
 ---Remove the given value from an array associated to a key in a table.
 ---@param tbl table<string, string> The table containing the key
 ---@param k string The key containing the array
@@ -95,7 +131,7 @@ end
 ---@param map keymap.map
 local function remove_duplicates(map)
   for stroke, commands in pairs(map) do
-    local normalized_stroke = normalize_stroke(stroke)
+    local normalized_stroke = normalize_sequence(stroke)
     if type(commands) == "string" or type(commands) == "function" then
       commands = { commands }
     end
@@ -122,7 +158,7 @@ end
 ---@param map keymap.map
 function keymap.add_direct(map)
   for stroke, commands in pairs(map) do
-    stroke = normalize_stroke(stroke)
+    stroke = normalize_sequence(stroke)
 
     if type(commands) == "string" or type(commands) == "function" then
       commands = { commands }
@@ -138,6 +174,7 @@ function keymap.add_direct(map)
       table.insert(keymap.reverse_map[cmd], stroke)
     end
   end
+  rebuild_prefix_set()
 end
 
 
@@ -148,7 +185,7 @@ end
 function keymap.add(map, overwrite)
   remove_duplicates(map)
   for stroke, commands in pairs(map) do
-    stroke = normalize_stroke(stroke)
+    stroke = normalize_sequence(stroke)
     if overwrite then
       if keymap.map[stroke] then
         for _, cmd in ipairs(keymap.map[stroke]) do
@@ -167,6 +204,7 @@ function keymap.add(map, overwrite)
       table.insert(keymap.reverse_map[cmd], stroke)
     end
   end
+  rebuild_prefix_set()
 end
 
 
@@ -174,9 +212,10 @@ end
 ---@param shortcut string
 ---@param cmd string
 function keymap.unbind(shortcut, cmd)
-  shortcut = normalize_stroke(shortcut)
+  shortcut = normalize_sequence(shortcut)
   remove_only(keymap.map, shortcut, cmd)
   remove_only(keymap.reverse_map, cmd, shortcut)
+  rebuild_prefix_set()
 end
 
 
@@ -199,6 +238,26 @@ end
 --------------------------------------------------------------------------------
 -- Events listening
 --------------------------------------------------------------------------------
+
+---Execute the command list bound to `sequence`, returning whether any ran.
+local function perform_sequence(commands, ...)
+  local performed = false
+  for _, cmd in ipairs(commands) do
+    if type(cmd) == "function" then
+      local ok, res = core.try(cmd, ...)
+      if ok then
+        performed = not (res == false)
+      else
+        performed = true
+      end
+    else
+      performed = command.perform(cmd, ...)
+    end
+    if performed then break end
+  end
+  return performed
+end
+
 function keymap.on_key_pressed(k, ...)
   local mk = modkey_map[k]
   if mk then
@@ -207,25 +266,37 @@ function keymap.on_key_pressed(k, ...)
     if mk == "altgr" then
       keymap.modkeys["ctrl"] = false
     end
-  else
-    local stroke = key_to_stroke(k)
-    local commands, performed = keymap.map[stroke], false
+    return false
+  end
+
+  local stroke = key_to_stroke(k)
+
+  if keymap.pending_prefix then
+    local sequence = keymap.pending_prefix .. " " .. stroke
+    local commands = keymap.map[sequence]
     if commands then
-      for _, cmd in ipairs(commands) do
-        if type(cmd) == "function" then
-          local ok, res = core.try(cmd, ...)
-          if ok then
-            performed = not (res == false)
-          else
-            performed = true
-          end
-        else
-          performed = command.perform(cmd, ...)
-        end
-        if performed then break end
-      end
-      return performed
+      keymap.pending_prefix = nil
+      return perform_sequence(commands, ...)
     end
+    if prefix_set[sequence] then
+      keymap.pending_prefix = sequence
+      core.log_quiet("%s -", sequence)
+      return true
+    end
+    -- No match — cancel the pending prefix and consume the key.
+    core.log_quiet("Key sequence %s is undefined", sequence)
+    keymap.pending_prefix = nil
+    return true
+  end
+
+  local commands = keymap.map[stroke]
+  if commands then
+    return perform_sequence(commands, ...)
+  end
+  if prefix_set[stroke] then
+    keymap.pending_prefix = stroke
+    core.log_quiet("%s -", stroke)
+    return true
   end
   return false
 end

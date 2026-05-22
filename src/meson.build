@@ -61,6 +61,10 @@ freetype_dep = dependency('freetype2', fallback: ['freetype2', 'freetype_dep'],
 )
 
 
+# SDL3 has no bundled wrap file (unlike lua/pcre2/freetype2 above).
+# It must be installed on the system, or a subprojects/sdl3.wrap must be
+# provided manually.  Use --wrap-mode=forcefallback together with a local
+# wrap to reproduce a fully self-contained build.
 sdl_dep = dependency('sdl3', static: true)
 
 lite_deps = [lua_dep, sdl_dep, freetype_dep, pcre2_dep, libm, libdl]
