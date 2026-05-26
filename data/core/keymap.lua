@@ -105,6 +105,11 @@ end
 ---@type string|nil
 keymap.pending_prefix = nil
 
+---Direct commands saved for the pending prefix stroke.
+---Executed as a fallback if the sequence is not completed.
+---@type table|nil
+keymap.pending_prefix_commands = nil
+
 
 ---Remove the given value from an array associated to a key in a table.
 ---@param tbl table<string, string> The table containing the key
@@ -273,30 +278,47 @@ function keymap.on_key_pressed(k, ...)
 
   if keymap.pending_prefix then
     local sequence = keymap.pending_prefix .. " " .. stroke
-    local commands = keymap.map[sequence]
-    if commands then
+    local seq_commands = keymap.map[sequence]
+    if seq_commands then
+      -- Sequence completed: discard deferred commands and execute the sequence.
       keymap.pending_prefix = nil
-      return perform_sequence(commands, ...)
+      keymap.pending_prefix_commands = nil
+      return perform_sequence(seq_commands, ...)
     end
     if prefix_set[sequence] then
+      -- Sequence is itself a prefix for a longer sequence: extend.
       keymap.pending_prefix = sequence
+      keymap.pending_prefix_commands = keymap.map[sequence]
       core.log_quiet("%s -", sequence)
       return true
     end
-    -- No match — cancel the pending prefix and consume the key.
-    core.log_quiet("Key sequence %s is undefined", sequence)
+    -- No match: execute any deferred first-stroke commands, then process
+    -- the current stroke as a fresh key press (fall through below).
+    local deferred = keymap.pending_prefix_commands
     keymap.pending_prefix = nil
-    return true
+    keymap.pending_prefix_commands = nil
+    if deferred then
+      perform_sequence(deferred, ...)
+    else
+      core.log_quiet("Key sequence %s is undefined", sequence)
+    end
+    -- intentional fall-through: process `stroke` without pending prefix
   end
 
+  -- No pending prefix (or just cleared above).
+  -- Check prefix_set BEFORE direct commands so that a stroke which is both
+  -- a direct binding and a sequence prefix correctly enters prefix mode.
+  -- The direct commands are saved and used as a deferred fallback if the
+  -- sequence is not completed.
+  if prefix_set[stroke] then
+    keymap.pending_prefix = stroke
+    keymap.pending_prefix_commands = keymap.map[stroke]  -- may be nil
+    core.log_quiet("%s -", stroke)
+    return true
+  end
   local commands = keymap.map[stroke]
   if commands then
     return perform_sequence(commands, ...)
-  end
-  if prefix_set[stroke] then
-    keymap.pending_prefix = stroke
-    core.log_quiet("%s -", stroke)
-    return true
   end
   return false
 end
