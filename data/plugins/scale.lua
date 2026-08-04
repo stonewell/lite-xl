@@ -182,6 +182,24 @@ if config.plugins.scale.use_mousewheel then
   }
 end
 
+-- SDL reports a real, live per-window display-scale change (e.g. the
+-- window was dragged to a monitor with a different DPI) as this event
+-- (see src/api/system.c's SDL_EVENT_WINDOW_DISPLAY_SCALE_CHANGED handling).
+-- Reuse the existing `set_scale` machinery -- already handles font/padding/
+-- scrollbar/syntax-font resize and scroll-position preservation for the
+-- ctrl+=/ctrl+- case above -- instead of duplicating that logic here.
+local old_on_event = core.on_event
+function core.on_event(type, ...)
+  if type == "displayscalechanged" then
+    local new_scale = ...
+    if new_scale and new_scale > 0 and new_scale ~= current_scale then
+      set_scale(new_scale)
+    end
+    return true
+  end
+  return old_on_event(type, ...)
+end
+
 local old_DocView_on_context_menu = DocView.on_context_menu
 function DocView:on_context_menu()
   local args = { old_DocView_on_context_menu(self) }

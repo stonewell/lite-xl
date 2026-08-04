@@ -400,11 +400,20 @@ top:
       return 1;
 
     case SDL_EVENT_WINDOW_DISPLAY_SCALE_CHANGED:
+      {
+        RenWindow* window_renderer = ren_find_window_from_id(e.window.windowID);
+        ren_resize_window(window_renderer);
+        lua_pushstring(L, "displayscalechanged");
+        lua_pushnumber(L, SDL_GetWindowDisplayScale(window_renderer->window));
+        return 2;
+      }
+
     case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
       {
         RenWindow* window_renderer = ren_find_window_from_id(e.window.windowID);
         ren_resize_window(window_renderer);
       }
+      goto top;
 
     default:
       // Custom event types are higher than SDL_EVENT_USER

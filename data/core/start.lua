@@ -5,6 +5,13 @@ MOD_VERSION_MINOR = 0
 MOD_VERSION_PATCH = 0
 MOD_VERSION_STRING = string.format("%d.%d.%d", MOD_VERSION_MAJOR, MOD_VERSION_MINOR, MOD_VERSION_PATCH)
 
+-- SDL's video subsystem isn't initialized yet at this point (that only
+-- happens later, inside core.init(), when the window is actually created --
+-- see src/renderer.c's video_init()), so there's no real display to query
+-- here. Leave this at the env var override (if any) or 1; the real scale
+-- gets applied live via the "displayscalechanged" event once the window
+-- exists (see data/plugins/scale.lua), which fires as soon as the window's
+-- actual pixel size/scale is established, including at initial creation.
 SCALE = tonumber(os.getenv("LITE_SCALE") or os.getenv("GDK_SCALE") or os.getenv("QT_SCALE_FACTOR")) or 1
 PATHSEP = package.config:sub(1, 1)
 
