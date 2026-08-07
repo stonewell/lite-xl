@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.21)
+cmake_minimum_required(VERSION 3.28)
 
 project(lite-xl
     VERSION 2.1.7
@@ -87,6 +87,16 @@ set(PROJECT_SOURCE_DIR "${CMAKE_SOURCE_DIR}")
 # Dependencies via FetchContent
 # All four are built as static libraries so the resulting binary is
 # self-contained on all platforms.
+#
+# pcre2/freetype/SDL3 each ship their own install() rules (libs, headers,
+# cmake config files, man pages, pkgconfig, ...), which by default get
+# pulled into *this* project's install output too. EXCLUDE_FROM_ALL on
+# their FetchContent_Declare() (CMake 3.28+) keeps the top-level
+# cmake_install.cmake from including those subdirectories' install
+# scripts at all -- lite-xl only ever needs them as static libraries
+# linked into lite-xl.exe, not installed standalone. It also drops their
+# non-library targets (pcre2grep, SDL3's test suite, etc.) from the
+# default ALL_BUILD target.
 # ===========================================================================
 include(FetchContent)
 
@@ -158,6 +168,7 @@ FetchContent_Declare(pcre2
     URL                      https://github.com/PCRE2Project/pcre2/releases/download/pcre2-10.44/pcre2-10.44.tar.bz2
     URL_HASH                 SHA256=d34f02e113cf7193a1ebf2770d3ac527088d485d4e047ed10e5d217c6ef5de96
     DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+    EXCLUDE_FROM_ALL
 )
 FetchContent_MakeAvailable(pcre2)
 
@@ -172,6 +183,7 @@ FetchContent_Declare(freetype
     URL                      https://download.savannah.gnu.org/releases/freetype/freetype-2.14.1.tar.xz
     URL_HASH                 SHA256=32427e8c471ac095853212a37aef816c60b42052d4d9e48230bab3bdf2936ccc
     DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+    EXCLUDE_FROM_ALL
 )
 FetchContent_MakeAvailable(freetype)
 
@@ -185,6 +197,7 @@ FetchContent_Declare(SDL3
     GIT_REPOSITORY https://github.com/libsdl-org/SDL.git
     GIT_TAG        release-3.4.8
     GIT_SHALLOW    TRUE
+    EXCLUDE_FROM_ALL
 )
 FetchContent_MakeAvailable(SDL3)
 
@@ -280,6 +293,18 @@ add_subdirectory(src)
 # ===========================================================================
 # Install
 # ===========================================================================
+
+# The portable/Windows layout expects data/ to sit beside the binary, which
+# doesn't make sense under CMake's system-wide default install prefix
+# (Program Files, admin-only on Windows) -- default to a plain, writable
+# location under the build tree instead so `cmake --install <build-dir>`
+# works without elevation. Only applies when the user hasn't already set
+# their own -DCMAKE_INSTALL_PREFIX=...; `cmake --install <build-dir>
+# --prefix <path>` still overrides this normally either way.
+if((WIN32 OR LITE_PORTABLE) AND CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
+    set(CMAKE_INSTALL_PREFIX "${CMAKE_BINARY_DIR}/dist" CACHE PATH
+        "Install path prefix, prepended onto install directories." FORCE)
+endif()
 
 # ── Portable / Windows layout ──────────────────────────────────────────────
 if(WIN32 OR LITE_PORTABLE)
