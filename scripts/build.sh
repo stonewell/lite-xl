@@ -234,6 +234,10 @@ main() {
       *) cmake_build_type="Release";;
     esac
     # use -DCMAKE_INSTALL_LIBDIR to work around possibility of cmake using lib64 instead of lib
+    local toolchain_opt=""
+    if [[ "$platform" == "windows" && -n "$cross" ]]; then
+      toolchain_opt="-DCMAKE_TOOLCHAIN_FILE=build-scripts/cmake-toolchain-mingw64-x86_64.cmake"
+    fi
     cmake -S "SDL3-$sdl3_version" -B "SDL3-$sdl3_version/build" -GNinja \
       -DCMAKE_OSX_DEPLOYMENT_TARGET="$MACOSX_DEPLOYMENT_TARGET" -DCMAKE_INTERPROCEDURAL_OPTIMIZATION=$([[ -n $lto ]] && echo ON || echo OFF) \
       -DCMAKE_BUILD_TYPE=$cmake_build_type -DCMAKE_INSTALL_LIBDIR=lib -DCMAKE_INSTALL_PREFIX="$(pwd -P)/prefix" \
@@ -242,7 +246,7 @@ main() {
       -DSDL_CAMERA=OFF -DSDL_JOYSTICK=OFF -DSDL_HAPTIC=OFF -DSDL_HIDAPI=OFF -DSDL_DIALOG=ON \
       -DSDL_POWER=OFF -DSDL_SENSOR=OFF -DSDL_VULKAN=OFF -DSDL_LIBUDEV=OFF -DSDL_SHARED=OFF -DSDL_STATIC=ON \
       -DSDL_X11=ON -DSDL_WAYLAND=ON -DSDL_TESTS=OFF -DSDL_EXAMPLES=OFF -DSDL_VENDOR_INFO=lite-xl \
-      -DCMAKE_TOOLCHAIN_FILE=build-scripts/cmake-toolchain-mingw64-x86_64.cmake
+      $toolchain_opt
     cmake --build "SDL3-$sdl3_version/build" && cmake --install "SDL3-$sdl3_version/build"
     pkg_config_path="--pkg-config-path=$(pwd -P)/prefix/lib/pkgconfig"
     popd

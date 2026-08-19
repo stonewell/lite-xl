@@ -138,7 +138,9 @@ if(WIN32)
     set_target_properties(lite-xl PROPERTIES WIN32_EXECUTABLE TRUE)
     # Disable the linker's auto-generated manifest so it does not conflict
     # with the custom manifest we embed through manifest.rc (CVT1100 / LNK1123).
-    target_link_options(lite-xl PRIVATE /MANIFEST:NO)
+    if(MSVC)
+        target_link_options(lite-xl PRIVATE /MANIFEST:NO)
+    endif()
     # Some of these are already pulled in transitively by SDL3, but listing
     # them explicitly ensures correctness regardless of SDL3 configuration.
     target_link_libraries(lite-xl PRIVATE

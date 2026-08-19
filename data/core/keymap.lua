@@ -118,12 +118,16 @@ keymap.pending_prefix_commands = nil
 local function remove_only(tbl, k, v)
   if tbl[k] then
     if v then
-      local j = 0
-      for i=1, #tbl[k] do
-        while tbl[k][i + j] == v do
-          j = j + 1
+      local res = {}
+      for _, item in ipairs(tbl[k]) do
+        if item ~= v then
+          table.insert(res, item)
         end
-        tbl[k][i] = tbl[k][i + j]
+      end
+      if #res > 0 then
+        tbl[k] = res
+      else
+        tbl[k] = nil
       end
     else
       tbl[k] = nil
@@ -293,16 +297,18 @@ function keymap.on_key_pressed(k, ...)
       return true
     end
     -- No match: execute any deferred first-stroke commands, then process
-    -- the current stroke as a fresh key press (fall through below).
+    -- the current stroke as a fresh key press if deferred did not perform.
     local deferred = keymap.pending_prefix_commands
     keymap.pending_prefix = nil
     keymap.pending_prefix_commands = nil
     if deferred then
-      perform_sequence(deferred, ...)
+      if perform_sequence(deferred, ...) then
+        return true
+      end
     else
       core.log_quiet("Key sequence %s is undefined", sequence)
     end
-    -- intentional fall-through: process `stroke` without pending prefix
+    -- fall-through: process `stroke` if deferred was nil or returned false
   end
 
   -- No pending prefix (or just cleared above).

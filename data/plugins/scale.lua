@@ -192,8 +192,10 @@ local old_on_event = core.on_event
 function core.on_event(type, ...)
   if type == "displayscalechanged" then
     local new_scale = ...
-    if new_scale and new_scale > 0 and new_scale ~= current_scale then
-      set_scale(new_scale)
+    if new_scale and new_scale > 0 and new_scale ~= default_scale then
+      local zoom_factor = default_scale > 0 and (current_scale / default_scale) or 1
+      default_scale = new_scale
+      set_scale(default_scale * zoom_factor)
     end
     return true
   end
