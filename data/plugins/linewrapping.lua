@@ -219,6 +219,13 @@ function LineWrapping.draw_guide(docview)
 end
 
 function LineWrapping.update_docview_breaks(docview)
+  if docview.doc.large_file or #docview.doc.lines > 10000 then
+    docview.wrapped_lines = nil
+    docview.wrapped_line_to_idx = nil
+    docview.wrapped_line_offsets = nil
+    docview.wrapped_settings = nil
+    return
+  end
   local w = docview.v_scrollbar.expanded_size or style.expanded_scrollbar_size
   local width = (type(config.plugins.linewrapping.width_override) == "function" and config.plugins.linewrapping.width_override(docview))
     or config.plugins.linewrapping.width_override or (docview.size.x - docview:get_gutter_width() - w)

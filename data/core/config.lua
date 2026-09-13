@@ -58,9 +58,35 @@ config.force_scrollbar_status = false
 ---The file size limit, in megabytes.
 ---Files larger than this size will not be shown in the file picker.
 ---
+---Defaults to 100.
+---@type number
+config.file_size_limit = 100
+
+---Threshold in megabytes to trigger Large File Mode.
 ---Defaults to 10.
 ---@type number
-config.file_size_limit = 10
+config.large_file_threshold_mb = 10
+
+---Force using the native C piece-tree buffer engine for all files.
+---Defaults to false (automatically enabled for large files).
+---@type boolean
+config.use_piece_tree = false
+
+---Threshold in line count to trigger Large File Mode.
+---Defaults to 50000.
+---@type number
+config.large_file_max_lines = 50000
+
+---Maximum line length (in bytes) to tokenize. Lines longer than this
+---will only be tokenized up to this limit to avoid UI freezing.
+---Defaults to 4096.
+---@type number
+config.max_line_length_tokens = 4096
+
+---Maximum token cache entries in Highlighter.
+---Defaults to 1000.
+---@type number
+config.highlighter_cache_size = 1000
 
 ---A list of files and directories to ignore.
 ---Each element is a Lua pattern, where patterns ending with a forward slash

@@ -9,6 +9,7 @@ set(LITE_SOURCES
     api/system.c
     api/process.c
     api/utf8.c
+    api/buffer.c
     api/dirmonitor.c
     arena_allocator.c
     custom_events.c

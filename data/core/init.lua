@@ -798,6 +798,7 @@ function core.custom_log(level, show, backtrace, fmt, ...)
     at = at,
     info = backtrace and debug.traceback("", 2):gsub("\t", "")
   }
+  core.log_items = core.log_items or {}
   table.insert(core.log_items, item)
   if #core.log_items > config.max_log_items then
     table.remove(core.log_items, 1)

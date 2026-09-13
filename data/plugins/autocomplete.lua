@@ -201,10 +201,11 @@ core.add_thread(function()
     local s = {}
     local syntax_symbols = load_syntax_symbols(doc)
     local max_symbols = config.plugins.autocomplete.max_symbols
-    if doc.disable_symbols then return s end
+    if doc.disable_symbols or doc.large_file then return s end
     local i = 1
     local symbols_count = 0
-    while i <= #doc.lines do
+    local max_lines = math.min(#doc.lines, 5000)
+    while i <= max_lines do
       for sym in doc.lines[i]:gmatch(config.symbol_pattern) do
         if not s[sym] and not syntax_symbols[sym] then
           symbols_count = symbols_count + 1

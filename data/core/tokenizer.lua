@@ -141,6 +141,16 @@ function tokenizer.tokenize(incoming_syntax, text, state, resume)
     return { "normal", text }, state
   end
 
+  local max_tokens_len = config.max_line_length_tokens or 4096
+  if #text > max_tokens_len and not resume then
+    local prefix = text:sub(1, max_tokens_len)
+    local suffix = text:sub(max_tokens_len + 1)
+    local tokens, final_state = tokenizer.tokenize(incoming_syntax, prefix, state)
+    table.insert(tokens, "normal")
+    table.insert(tokens, suffix)
+    return tokens, final_state, nil
+  end
+
   if resume then
     res = resume.res
     -- Remove "incomplete" tokens

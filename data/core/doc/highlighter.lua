@@ -12,6 +12,9 @@ function Highlighter:__tostring() return "Highlighter" end
 function Highlighter:new(doc)
   self.doc = doc
   self.running = false
+  self.cache_order = {}
+  self.cache_idx = 1
+  self.max_cache = config.highlighter_cache_size or 1000
   self:reset()
 end
 
@@ -24,7 +27,8 @@ function Highlighter:start()
       local max = math.min(self.first_invalid_line + 40, self.max_wanted_line)
       local retokenized_from
       for i = self.first_invalid_line, max do
-        local state = (i > 1) and self.lines[i - 1].state
+        local prev = (i > 1) and self.lines[i - 1]
+        local state = (type(prev) == "table") and prev.state or nil
         local line = self.lines[i]
         if line and line.resume and (line.init_state ~= state or line.text ~= self.doc.lines[i]) then
           -- Reset the progress if no longer valid
@@ -66,13 +70,15 @@ end
 
 function Highlighter:reset()
   self.lines = {}
+  self.cache_order = {}
+  self.cache_idx = 1
   self:soft_reset()
 end
 
 function Highlighter:soft_reset()
-  for i=1,#self.lines do
-    self.lines[i] = false
-  end
+  self.lines = {}
+  self.cache_order = {}
+  self.cache_idx = 1
   self.first_invalid_line = 1
   self.max_wanted_line = 0
 end
@@ -83,17 +89,13 @@ function Highlighter:invalidate(idx)
 end
 
 function Highlighter:insert_notify(line, n)
+  self:soft_reset()
   self:invalidate(line)
-  local blanks = { }
-  for i = 1, n do
-    blanks[i] = false
-  end
-  common.splice(self.lines, line, 0, blanks)
 end
 
 function Highlighter:remove_notify(line, n)
+  self:soft_reset()
   self:invalidate(line)
-  common.splice(self.lines, line, n)
 end
 
 function Highlighter:update_notify(line, n)
@@ -113,12 +115,23 @@ end
 function Highlighter:get_line(idx)
   local line = self.lines[idx]
   if not line or line.text ~= self.doc.lines[idx] then
-    local prev = self.lines[idx - 1]
-    line = self:tokenize_line(idx, prev and prev.state)
+    local prev = (idx > 1) and self.lines[idx - 1]
+    local state = (type(prev) == "table") and prev.state or nil
+    line = self:tokenize_line(idx, state)
+
+    -- Evict oldest entry if cache exceeds maximum allowed lines
+    local old_idx = self.cache_order[self.cache_idx]
+    if old_idx and old_idx ~= idx then
+      self.lines[old_idx] = nil
+    end
     self.lines[idx] = line
+    self.cache_order[self.cache_idx] = idx
+    self.cache_idx = (self.cache_idx % self.max_cache) + 1
+
     self:update_notify(idx, 0)
   end
-  set_max_wanted_lines(self, math.max(self.max_wanted_line, idx))
+  -- Restrict eager lookahead to at most 80 lines ahead of requested line
+  set_max_wanted_lines(self, math.min(math.max(self.max_wanted_line, idx + 80), #self.doc.lines))
   return line
 end
 

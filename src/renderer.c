@@ -642,6 +642,8 @@ double ren_draw_text(RenSurface *rs, RenFont **fonts, const char *text, size_t l
     if (!metric)
       break;
     int start_x = floor(pen_x) + metric->bitmap_left;
+    if (start_x >= clip_end_x && !underline && !strikethrough)
+      break;
     int end_x = metric->x1 + start_x; // x0 is assumed to be 0
     int glyph_end = metric->x1, glyph_start = 0;
     if (!font_surface && !is_whitespace(codepoint))

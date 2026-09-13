@@ -172,6 +172,11 @@ end
 
 function DocView:get_col_x_offset(line, col)
   local default_font = self:get_font()
+  local line_text = self.doc.lines[line]
+  if line_text and #line_text > 4096 and not style.syntax_fonts then
+    local cw = default_font:get_width(" ")
+    return math.max(0, (col - 1) * cw)
+  end
   local _, indent_size = self.doc:get_indent_info()
   default_font:set_tab_size(indent_size)
   local column = 1
@@ -203,6 +208,13 @@ end
 
 function DocView:get_x_offset_col(line, x)
   local line_text = self.doc.lines[line]
+  local default_font = self:get_font()
+  if line_text and #line_text > 4096 and not style.syntax_fonts then
+    local cw = default_font:get_width(" ")
+    if cw > 0 then
+      return common.clamp(math.floor(x / cw) + 1, 1, #line_text)
+    end
+  end
 
   local xoffset, i = 0, 1
   local default_font = self:get_font()

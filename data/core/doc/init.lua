@@ -5,6 +5,7 @@ local core = require "core"
 local syntax = require "core.syntax"
 local config = require "core.config"
 local common = require "core.common"
+local buffer = buffer or require "buffer"
 
 ---@class core.doc : core.object
 local Doc = Object:extend()
@@ -35,6 +36,8 @@ function Doc:new(filename, abs_filename, new_file)
 end
 
 function Doc:reset()
+  self.buffer = nil
+  self.large_file = nil
   self.lines = { "\n" }
   self.selections = { 1, 1, 1, 1 }
   self.last_selection = 1
@@ -47,6 +50,11 @@ function Doc:reset()
 end
 
 function Doc:reset_syntax()
+  if self.large_file then
+    self.syntax = nil
+    self.highlighter:soft_reset()
+    return
+  end
   local header = self:get_text(1, 1, self:position_offset(1, 1, 128))
   local path = self.abs_filename
   if not path and self.filename then
@@ -67,6 +75,29 @@ function Doc:set_filename(filename, abs_filename)
 end
 
 function Doc:load(filename)
+  local info = system.get_file_info(filename)
+  local file_size_mb = info and (info.size / 1e6) or 0
+  local is_large = file_size_mb >= (config.large_file_threshold_mb or 10)
+
+  if (config.use_piece_tree or is_large) and buffer then
+    local ok, b = pcall(buffer.open, filename)
+    if ok and b then
+      self:reset()
+      self.buffer = b
+      self.lines = b
+      if is_large or #b >= (config.large_file_max_lines or 50000) then
+        self.large_file = true
+        core.log_quiet("Document \"%s\" opened with Piece-Tree Buffer in Large File Mode (%d lines, %.1f MB)",
+          self:get_name(), #self.lines, file_size_mb)
+      else
+        core.log_quiet("Document \"%s\" opened with Piece-Tree Buffer (%d lines, %.1f MB)",
+          self:get_name(), #self.lines, file_size_mb)
+      end
+      self:reset_syntax()
+      return
+    end
+  end
+
   local fp = assert(io.open(filename, "rb"))
   self:reset()
   self.lines = {}
@@ -77,13 +108,19 @@ function Doc:load(filename)
       self.crlf = true
     end
     table.insert(self.lines, line .. "\n")
-    self.highlighter.lines[i] = false
     i = i + 1
   end
   if #self.lines == 0 then
     table.insert(self.lines, "\n")
   end
   fp:close()
+
+  if file_size_mb >= (config.large_file_threshold_mb or 10) or #self.lines >= (config.large_file_max_lines or 50000) then
+    self.large_file = true
+    core.log_quiet("Document \"%s\" opened in Large File Mode (%d lines, %.1f MB)",
+      self:get_name(), #self.lines, file_size_mb)
+  end
+
   self:reset_syntax()
 end
 
@@ -103,6 +140,14 @@ function Doc:save(filename, abs_filename)
     abs_filename = self.abs_filename
   else
     assert(self.filename or abs_filename, "calling save on unnamed doc without absolute path")
+  end
+
+  if self.buffer then
+    self.buffer:save(abs_filename)
+    self:set_filename(filename, abs_filename)
+    self.new_file = false
+    self:clean()
+    return
   end
 
   local fp
@@ -355,6 +400,10 @@ function Doc:get_text(line1, col1, line2, col2, inclusive)
   line1, col1 = self:sanitize_position(line1, col1)
   line2, col2 = self:sanitize_position(line2, col2)
   line1, col1, line2, col2 = sort_positions(line1, col1, line2, col2)
+  if self.buffer then
+    local c2 = inclusive and (col2 + 1) or col2
+    return self.buffer:get_text(line1, col1, line2, c2)
+  end
   local col2_offset = inclusive and 0 or 1
   if line1 == line2 then
     return self.lines[line1]:sub(col1, col2 - col2_offset)
@@ -416,16 +465,21 @@ function Doc:raw_insert(line, col, text, undo_stack, time)
   -- split text into lines and merge with line at insertion point
   local lines = split_lines(text)
   local len = #lines[#lines]
-  local before = self.lines[line]:sub(1, col - 1)
-  local after = self.lines[line]:sub(col)
-  for i = 1, #lines - 1 do
-    lines[i] = lines[i] .. "\n"
-  end
-  lines[1] = before .. lines[1]
-  lines[#lines] = lines[#lines] .. after
 
-  -- splice lines into line array
-  common.splice(self.lines, line, 1, lines)
+  if self.buffer then
+    self.buffer:insert(line, col, text)
+  else
+    local before = self.lines[line]:sub(1, col - 1)
+    local after = self.lines[line]:sub(col)
+    for i = 1, #lines - 1 do
+      lines[i] = lines[i] .. "\n"
+    end
+    lines[1] = before .. lines[1]
+    lines[#lines] = lines[#lines] .. after
+
+    -- splice lines into line array
+    common.splice(self.lines, line, 1, lines)
+  end
 
   -- keep cursors where they should be
   for idx, cline1, ccol1, cline2, ccol2 in self:get_selections(true, true) do
@@ -452,15 +506,19 @@ function Doc:raw_remove(line1, col1, line2, col2, undo_stack, time)
   push_undo(undo_stack, time, "selection", table.unpack(self.selections))
   push_undo(undo_stack, time, "insert", line1, col1, text)
 
-  -- get line content before/after removed text
-  local before = self.lines[line1]:sub(1, col1 - 1)
-  local after = self.lines[line2]:sub(col2)
-
   local line_removal = line2 - line1
   local col_removal = col2 - col1
 
-  -- splice line into line array
-  common.splice(self.lines, line1, line_removal + 1, { before .. after })
+  if self.buffer then
+    self.buffer:remove(line1, col1, line2, col2)
+  else
+    -- get line content before/after removed text
+    local before = self.lines[line1]:sub(1, col1 - 1)
+    local after = self.lines[line2]:sub(col2)
+
+    -- splice line into line array
+    common.splice(self.lines, line1, line_removal + 1, { before .. after })
+  end
 
   local merge = false
 
@@ -586,7 +644,21 @@ function Doc:replace(fn)
   end
   if not has_selection then
     self:set_selection(table.unpack(self.selections))
-    results[1] = self:replace_cursor(1, 1, 1, #self.lines, #self.lines[#self.lines], fn)
+    if #self.lines > 10000 or self.large_file then
+      local count = 0
+      for line = 1, #self.lines do
+        local old_text = self.lines[line]
+        local new_text, n = fn(old_text)
+        if new_text and new_text ~= old_text then
+          self:remove(line, 1, line, #old_text + 1)
+          self:insert(line, 1, new_text)
+          count = count + (n or 1)
+        end
+      end
+      results[1] = count
+    else
+      results[1] = self:replace_cursor(1, 1, 1, #self.lines, #self.lines[#self.lines], fn)
+    end
   end
   return results
 end
@@ -694,6 +766,10 @@ end
 -- For plugins to get notified when a document is closed
 function Doc:on_close()
   core.log_quiet("Closed doc \"%s\"", self:get_name())
+  if self.buffer then
+    self.buffer = nil
+    self.lines = { "\n" }
+  end
 end
 
 return Doc
