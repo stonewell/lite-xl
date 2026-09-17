@@ -220,13 +220,16 @@ static size_t find_offset_by_lineno(TextBuffer *buf, size_t lineno) {
       if (target_lf <= node->line_feed_cnt) {
         /* The target newline is inside this piece */
         const char *data = get_piece_data(buf, node);
-        for (size_t i = 0; i < node->length; i++) {
-          if (data[i] == '\n') {
-            target_lf--;
-            if (target_lf == 0) {
-              return accum_offset + i + 1; /* Position immediately after '\n' */
-            }
+        const char *p = data;
+        const char *end = data + node->length;
+        while (p < end) {
+          const char *nl = (const char *)memchr(p, '\n', end - p);
+          if (!nl) break;
+          target_lf--;
+          if (target_lf == 0) {
+            return accum_offset + (size_t)(nl - data) + 1; /* Position immediately after '\n' */
           }
+          p = nl + 1;
         }
       }
       accum_offset += node->length;

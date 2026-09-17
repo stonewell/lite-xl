@@ -81,7 +81,7 @@ end
 
 local function get_comment_patterns(syntax, _loop)
   _loop = _loop or 1
-  if _loop > 5 then return end
+  if _loop > 5 or not syntax or not syntax.patterns then return end
   if comments_cache[syntax] then
     if #comments_cache[syntax] > 0 then
       return comments_cache[syntax]
@@ -260,6 +260,9 @@ end
 
 
 local function detect_indent_stat(doc)
+  if doc.large_file then
+    return config.tab_type, config.indent_size, 0
+  end
   local stat = {}
   local tab_count = 0
   local runs = 1

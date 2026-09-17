@@ -137,7 +137,7 @@ function tokenizer.tokenize(incoming_syntax, text, state, resume)
 
   state = state or string.char(0)
 
-  if #incoming_syntax.patterns == 0 then
+  if not incoming_syntax or not incoming_syntax.patterns or #incoming_syntax.patterns == 0 then
     return { "normal", text }, state
   end
 

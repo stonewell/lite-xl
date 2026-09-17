@@ -51,7 +51,7 @@ end
 
 function Doc:reset_syntax()
   if self.large_file then
-    self.syntax = nil
+    self.syntax = syntax.plain_text_syntax
     self.highlighter:soft_reset()
     return
   end

@@ -5,6 +5,7 @@ local style = require "core.style"
 local keymap = require "core.keymap"
 local translate = require "core.doc.translate"
 local ime = require "core.ime"
+local tokenizer = require "core.tokenizer"
 local View = require "core.view"
 local ContextMenu = require "core.contextmenu"
 
@@ -465,7 +466,7 @@ function DocView:draw_line_text(line, x, y)
     last_token = tokens_count - 1
   end
   local start_tx = tx
-  for tidx, type, text in self.doc.highlighter:each_token(line) do
+  for tidx, type, text in tokenizer.each_token(tokens) do
     local color = style.syntax[type]
     local font = style.syntax_fonts[type] or default_font
     -- do not render newline, fixes issue #1164
