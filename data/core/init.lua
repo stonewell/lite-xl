@@ -299,7 +299,8 @@ function core.init()
         project_dir_explicit = true
       else
         -- on macOS we can get an argument like "-psn_0_52353" that we just ignore.
-        if not ARGS[i]:match("^-psn") then
+        -- also ignore command-line flags starting with '-'
+        if not ARGS[i]:match("^-psn") and not ARGS[i]:match("^%-") then
           local file_abs = common.is_absolute_path(arg_filename) and arg_filename or (system.absolute_path(".") .. PATHSEP .. common.normalize_path(arg_filename))
           if file_abs then
             table.insert(files, file_abs)
@@ -600,7 +601,7 @@ function core.load_plugins()
     { priority = -2, load = load_lua_plugin_if_exists, version_match = true, file = USERDIR .. PATHSEP .. "init.lua", name = "User Module" },
     { priority = -1, load = load_lua_plugin_if_exists, version_match = true, file = core.root_project().path .. PATHSEP .. ".lite_project.lua", name = "Project Module" }
   }
-  for _, root_dir in ipairs {DATADIR, USERDIR} do
+  for _, root_dir in ipairs {USERDIR, DATADIR} do
     local plugin_dir = root_dir .. PATHSEP .. "plugins"
     for _, filename in ipairs(system.list_dir(plugin_dir) or {}) do
       if not files[filename] then

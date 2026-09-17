@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_main.h>
 #include "api/api.h"
@@ -108,6 +109,24 @@ int main(int argc, char **argv) {
 #ifndef _WIN32
   signal(SIGPIPE, SIG_IGN);
 #endif
+
+  for (int i = 1; i < argc; i++) {
+    if (strcmp(argv[i], "--version") == 0 || strcmp(argv[i], "-v") == 0) {
+      printf("Lite XL %s\n", LITE_PROJECT_VERSION_STR);
+      return EXIT_SUCCESS;
+    }
+    if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
+      printf("Usage: %s [options] [files/directories...]\n\n", argv[0]);
+      printf("Options:\n");
+      printf("  -v, --version    Show version information and exit\n");
+      printf("  -h, --help       Show this help message and exit\n\n");
+      printf("Environment Variables:\n");
+      printf("  LITE_USERDIR     Path to directory containing user configuration\n");
+      printf("  LITE_PREFIX      Path to installation prefix\n");
+      printf("  LITE_SCALE       UI scale factor\n");
+      return EXIT_SUCCESS;
+    }
+  }
 
   SDL_SetAppMetadata("Lite XL", LITE_PROJECT_VERSION_STR, "com.lite_xl.LiteXL");
   if (!SDL_Init(SDL_INIT_EVENTS)) {
