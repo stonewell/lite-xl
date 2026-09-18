@@ -30,8 +30,15 @@ end
 
 DocView.translate = {
   ["previous_page"] = function(doc, line, col, dv)
+    if line == 1 then
+      return 1, 1
+    end
     local min, max = dv:get_visible_line_range()
-    return line - (max - min), 1
+    local page_lines = math.max(1, (max - min) - 2)
+    local lh = dv:get_line_height()
+    dv.scroll.to.y = math.max(0, dv.scroll.to.y - page_lines * lh)
+    local target_line = math.max(1, line - page_lines)
+    return move_to_line_offset(dv, line, col, target_line - line)
   end,
 
   ["next_page"] = function(doc, line, col, dv)
@@ -39,7 +46,11 @@ DocView.translate = {
       return #doc.lines, #doc.lines[line]
     end
     local min, max = dv:get_visible_line_range()
-    return line + (max - min), 1
+    local page_lines = math.max(1, (max - min) - 2)
+    local lh = dv:get_line_height()
+    dv.scroll.to.y = dv.scroll.to.y + page_lines * lh
+    local target_line = math.min(#doc.lines, line + page_lines)
+    return move_to_line_offset(dv, line, col, target_line - line)
   end,
 
   ["previous_line"] = function(doc, line, col, dv)
@@ -493,17 +504,27 @@ function DocView:draw_line_body(line, x, y)
   -- draw highlight if any selection ends on this line
   local draw_highlight = false
   local hcl = config.highlight_current_line
+  local sels = self.doc.selections
   if hcl ~= false then
-    for lidx, line1, col1, line2, col2 in self.doc:get_selections(false) do
+    if #sels == 4 then
+      local line1, col1, line2, col2 = sels[1], sels[2], sels[3], sels[4]
       if line1 == line then
-        if hcl == "no_selection" then
-          if (line1 ~= line2) or (col1 ~= col2) then
-            draw_highlight = false
-            break
-          end
+        if hcl ~= "no_selection" or (line1 == line2 and col1 == col2) then
+          draw_highlight = true
         end
-        draw_highlight = true
-        break
+      end
+    else
+      for lidx, line1, col1, line2, col2 in self.doc:get_selections(false) do
+        if line1 == line then
+          if hcl == "no_selection" then
+            if (line1 ~= line2) or (col1 ~= col2) then
+              draw_highlight = false
+              break
+            end
+          end
+          draw_highlight = true
+          break
+        end
       end
     end
   end
@@ -513,7 +534,11 @@ function DocView:draw_line_body(line, x, y)
 
   -- draw selection if it overlaps this line
   local lh = self:get_line_height()
-  for lidx, line1, col1, line2, col2 in self.doc:get_selections(true) do
+  if #sels == 4 then
+    local line1, col1, line2, col2 = sels[1], sels[2], sels[3], sels[4]
+    if line2 < line1 or (line2 == line1 and col2 < col1) then
+      line1, col1, line2, col2 = line2, col2, line1, col1
+    end
     if line >= line1 and line <= line2 then
       local text = self.doc.lines[line]
       if line1 ~= line then col1 = 1 end
@@ -522,6 +547,19 @@ function DocView:draw_line_body(line, x, y)
       local x2 = x + self:get_col_x_offset(line, col2)
       if x1 ~= x2 then
         renderer.draw_rect(x1, y, x2 - x1, lh, style.selection)
+      end
+    end
+  else
+    for lidx, line1, col1, line2, col2 in self.doc:get_selections(true) do
+      if line >= line1 and line <= line2 then
+        local text = self.doc.lines[line]
+        if line1 ~= line then col1 = 1 end
+        if line2 ~= line then col2 = #text + 1 end
+        local x1 = x + self:get_col_x_offset(line, col1)
+        local x2 = x + self:get_col_x_offset(line, col2)
+        if x1 ~= x2 then
+          renderer.draw_rect(x1, y, x2 - x1, lh, style.selection)
+        end
       end
     end
   end
@@ -533,10 +571,19 @@ end
 
 function DocView:draw_line_gutter(line, x, y, width)
   local color = style.line_number
-  for _, line1, _, line2 in self.doc:get_selections(true) do
+  local sels = self.doc.selections
+  if #sels == 4 then
+    local line1, line2 = sels[1], sels[3]
+    if line2 < line1 then line1, line2 = line2, line1 end
     if line >= line1 and line <= line2 then
       color = style.line_number2
-      break
+    end
+  else
+    for _, line1, _, line2 in self.doc:get_selections(true) do
+      if line >= line1 and line <= line2 then
+        color = style.line_number2
+        break
+      end
     end
   end
   x = x + style.padding.x

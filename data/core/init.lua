@@ -372,7 +372,12 @@ function core.init()
   -- Load core and user plugins giving preference to user ones with same name.
   local plugins_success, plugins_refuse_list = core.load_plugins()
 
+  if config.force_software_renderer then
+    renderer.set_software_rendering(true)
+  end
+
   core.window = core.window or renwindow._restore() or renwindow.create("")
+  core.log_quiet("Renderer backend: %s (GPU: %s)", renderer.get_backend(), tostring(renderer.is_gpu()))
   if session.window_mode == "normal" then
     system.set_window_size(core.window, table.unpack(session.window))
   elseif session.window_mode == "maximized" then

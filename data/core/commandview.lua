@@ -284,10 +284,12 @@ function CommandView:update_suggestions()
   for i, item in ipairs(t) do
     if type(item) == "string" then
       item = { text = item }
+    elseif type(item) == "table" and not item.text then
+      item.text = tostring(item)
     end
     res[i] = item
   end
-  if self.suggestions and self.last_change == "suggestion" then
+  if self.suggestions and self.last_change == "suggestion" and self.suggestions[self.suggestion_idx] then
     local new_suggestion_idx
     for i, v in ipairs(res) do
       if v.text == self.suggestions[self.suggestion_idx].text then
@@ -295,7 +297,7 @@ function CommandView:update_suggestions()
         break
       end
     end
-    self.suggestion_idx = new_suggestion_idx
+    self.suggestion_idx = new_suggestion_idx or 1
     -- This preserves the suggestion_offset and realigns it with the new table.
     self:move_suggestion_idx(0)
   else

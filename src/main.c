@@ -6,6 +6,7 @@
 #include "api/api.h"
 #include "rencache.h"
 #include "renderer.h"
+#include "renwindow.h"
 #include "custom_events.h"
 
 #include <signal.h>
@@ -111,6 +112,9 @@ int main(int argc, char **argv) {
 #endif
 
   for (int i = 1; i < argc; i++) {
+    if (strcmp(argv[i], "--software-renderer") == 0) {
+      renwin_set_force_software(true);
+    }
     if (strcmp(argv[i], "--version") == 0 || strcmp(argv[i], "-v") == 0) {
       printf("Lite XL %s\n", LITE_PROJECT_VERSION_STR);
       return EXIT_SUCCESS;
@@ -118,14 +122,20 @@ int main(int argc, char **argv) {
     if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
       printf("Usage: %s [options] [files/directories...]\n\n", argv[0]);
       printf("Options:\n");
-      printf("  -v, --version    Show version information and exit\n");
-      printf("  -h, --help       Show this help message and exit\n\n");
+      printf("  -v, --version        Show version information and exit\n");
+      printf("  -h, --help           Show this help message and exit\n");
+      printf("  --software-renderer  Force CPU software rendering instead of GPU\n\n");
       printf("Environment Variables:\n");
-      printf("  LITE_USERDIR     Path to directory containing user configuration\n");
-      printf("  LITE_PREFIX      Path to installation prefix\n");
-      printf("  LITE_SCALE       UI scale factor\n");
+      printf("  LITE_USERDIR            Path to directory containing user configuration\n");
+      printf("  LITE_PREFIX             Path to installation prefix\n");
+      printf("  LITE_SCALE              UI scale factor\n");
+      printf("  LITE_SOFTWARE_RENDERER  Force CPU software rendering when set\n");
       return EXIT_SUCCESS;
     }
+  }
+
+  if (SDL_getenv("LITE_SOFTWARE_RENDERER")) {
+    renwin_set_force_software(true);
   }
 
   SDL_SetAppMetadata("Lite XL", LITE_PROJECT_VERSION_STR, "com.lite_xl.LiteXL");

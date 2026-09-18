@@ -115,9 +115,7 @@ typedef struct RenFont {
   FT_Face face;
   CharMap charmap;
   GlyphMap glyphs;
-#ifdef LITE_USE_SDL_RENDERER
   int scale;
-#endif
   float size, space_advance;
   unsigned short baseline, height, tab_size;
   unsigned short underline_thickness;
@@ -127,7 +125,6 @@ typedef struct RenFont {
   char path[];
 } RenFont;
 
-#ifdef LITE_USE_SDL_RENDERER
 void update_font_scale(RenWindow *window_renderer, RenFont **fonts) {
   if (window_renderer == NULL) return;
   const int surface_scale = renwin_get_surface(window_renderer).scale;
@@ -138,7 +135,6 @@ void update_font_scale(RenWindow *window_renderer, RenFont **fonts) {
     }
   }
 }
-#endif
 
 static const char* utf8_to_codepoint(const char *p, const char *endp, unsigned *dst) {
   const unsigned char *up = (unsigned char*)p;
@@ -434,9 +430,9 @@ static void font_file_close(FT_Stream stream) {
 static int font_set_face_metrics(RenFont *font, FT_Face face) {
   FT_Error err;
   float pixel_size = font->size;
-  #ifdef LITE_USE_SDL_RENDERER
-  pixel_size *= font->scale;
-  #endif
+  if (font->scale > 0) {
+    pixel_size *= font->scale;
+  }
   if ((err = FT_Set_Pixel_Sizes(face, 0, (int) pixel_size)) != 0)
     return err;
 
@@ -474,9 +470,7 @@ RenFont* ren_font_load(const char* path, float size, ERenFontAntialiasing antial
   font->hinting = hinting;
   font->style = style;
   font->tab_size = 2;
-#ifdef LITE_USE_SDL_RENDERER
   font->scale = 1;
-#endif
 
   stream = check_alloc(SDL_calloc(1, sizeof(FT_StreamRec)));
   if (!stream) goto stream_failure;
@@ -542,9 +536,7 @@ void ren_font_group_set_size(RenFont **fonts, float size, int surface_scale) {
     font_clear_glyph_cache(fonts[i]);
     fonts[i]->size = size;
     fonts[i]->tab_size = 2;
-    #ifdef LITE_USE_SDL_RENDERER
-    fonts[i]->scale = surface_scale;
-    #endif
+    fonts[i]->scale = surface_scale > 0 ? surface_scale : 1;
     font_set_face_metrics(fonts[i], fonts[i]->face);
   }
 }
@@ -592,11 +584,7 @@ double ren_font_group_get_width(RenFont **fonts, const char *text, size_t len, R
   }
   if (!set_x_offset)
     *x_offset = 0;
-#ifdef LITE_USE_SDL_RENDERER
-  return width / fonts[0]->scale;
-#else
-  return width;
-#endif
+  return width / (fonts[0]->scale > 0 ? fonts[0]->scale : 1);
 }
 
 #ifdef RENDERER_DEBUG
@@ -787,7 +775,9 @@ int video_init(void) {
     ** It also enables aero-snap on Windows apparently. */
     SDL_SetHint("SDL_BORDERLESS_RESIZABLE_STYLE", "1");
     SDL_SetHint("SDL_MOUSE_DOUBLE_CLICK_RADIUS", "4");
-    SDL_SetHint(SDL_HINT_RENDER_DRIVER, "software");
+    if (renwin_get_force_software()) {
+      SDL_SetHint(SDL_HINT_RENDER_DRIVER, "software");
+    }
     ren_inited = 1;
   }
   return 0;
@@ -860,10 +850,10 @@ void ren_get_size(RenWindow *window_renderer, int *x, int *y) {
   RenSurface rs = renwin_get_surface(window_renderer);
   *x = rs.surface->w;
   *y = rs.surface->h;
-#ifdef LITE_USE_SDL_RENDERER
-  *x /= rs.scale;
-  *y /= rs.scale;
-#endif
+  if (rs.scale > 1) {
+    *x /= rs.scale;
+    *y /= rs.scale;
+  }
 }
 
 size_t ren_get_window_list(RenWindow ***window_list_dest) {

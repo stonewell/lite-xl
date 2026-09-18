@@ -20,7 +20,8 @@ local function push_token(t, type, text)
 end
 
 
-local function push_tokens(t, syn, pattern, full_text, find_results)
+local function push_tokens(t, syn, pattern, full_text, find_results, is_ascii)
+  local sub_fn = is_ascii and full_text.sub or full_text.usub
   if #find_results > 2 then
     -- We do some manipulation with find_results so that it's arranged
     -- like this:
@@ -40,13 +41,13 @@ local function push_tokens(t, syn, pattern, full_text, find_results)
       local type = pattern.type[i - 2]
         -- ↑ (i - 2) to convert from [3; n] to [1; n]
       if fin >= start then
-        local text = full_text:usub(start, fin)
+        local text = sub_fn(full_text, start, fin)
         push_token(t, syn.symbols[text] or type, text)
       end
     end
   else
     local start, fin = find_results[1], find_results[2]
-    local text = full_text:usub(start, fin)
+    local text = sub_fn(full_text, start, fin)
     push_token(t, syn.symbols[text] or pattern.type, text)
   end
 end
@@ -209,6 +210,8 @@ function tokenizer.tokenize(incoming_syntax, text, state, resume)
       retrieve_syntax_state(incoming_syntax, state)
   end
 
+  local is_ascii = not text:find("[\128-\255]")
+
   local function find_text(text, p, offset, at_start, close)
     local target, res = p.pattern or p.regex, { 1, offset - 1 }
     local p_idx = close and 2 or 1
@@ -218,15 +221,15 @@ function tokenizer.tokenize(incoming_syntax, text, state, resume)
     if p.whole_line == nil then p.whole_line = { } end
     if p.whole_line[p_idx] == nil then
       -- Match patterns that start with '^'
-      p.whole_line[p_idx] = code:umatch("^%^") and true or false
+      p.whole_line[p_idx] = (type(code) == "string" and code:sub(1, 1) == "^") and true or false
       if p.whole_line[p_idx] then
         -- Remove '^' from the beginning of the pattern
         if type(target) == "table" then
-          target[p_idx] = code:usub(2)
+          target[p_idx] = code:sub(2)
           code = target[p_idx]
         else
-          p.pattern = p.pattern and code:usub(2)
-          p.regex = p.regex and code:usub(2)
+          p.pattern = p.pattern and code:sub(2)
+          p.regex = p.regex and code:sub(2)
           code = p.pattern or p.regex
         end
       end
@@ -237,15 +240,56 @@ function tokenizer.tokenize(incoming_syntax, text, state, resume)
       code = p._regex
     end
 
-    repeat
-      local next = res[2] + 1
-      -- If the pattern contained '^', allow matching only the whole line
-      if p.whole_line[p_idx] and next > 1 then
-        return
+    local next = offset
+    if p.whole_line[p_idx] and next > 1 then
+      return
+    end
+
+    if p.pattern then
+      if not p._anchored_pattern then p._anchored_pattern = {} end
+      if not p._anchored_pattern[p_idx] then
+        p._anchored_pattern[p_idx] = "^" .. code
       end
-      res = p.pattern and { text:ufind((at_start or p.whole_line[p_idx]) and "^" .. code or code, next) }
-        or { regex.find(code, text, text:ucharpos(next), (at_start or p.whole_line[p_idx]) and regex.ANCHORED or 0) }
-      if p.regex and #res > 0 then -- set correct utf8 len for regex result
+      local pat = (at_start or p.whole_line[p_idx]) and p._anchored_pattern[p_idx] or code
+      local esc = target[3]
+
+      while true do
+        local r1, r2, r3, r4, r5, r6, r7
+        if is_ascii then
+          r1, r2, r3, r4, r5, r6, r7 = text:find(pat, next)
+        else
+          r1, r2, r3, r4, r5, r6, r7 = text:ufind(pat, next)
+        end
+        if not r1 then return end
+
+        if esc then
+          local count = 0
+          local esc_b = esc:byte()
+          if is_ascii then
+            for j = r1 - 1, 1, -1 do
+              if text:byte(j) ~= esc_b then break end
+              count = count + 1
+            end
+          else
+            for j = r1 - 1, 1, -1 do
+              if text:ubyte(j) ~= esc_b then break end
+              count = count + 1
+            end
+          end
+          if count % 2 == 0 then
+            return r1, r2, r3, r4, r5, r6, r7
+          else
+            if at_start then return end
+            next = r1 + 1
+          end
+        else
+          return r1, r2, r3, r4, r5, r6, r7
+        end
+      end
+    else
+      -- regex
+      local res = { regex.find(code, text, text:ucharpos(next), (at_start or p.whole_line[p_idx]) and regex.ANCHORED or 0) }
+      if #res > 0 then
         local char_pos_1 = res[1] > next and string.ulen(text:sub(1, res[1])) or next
         local char_pos_2 = string.ulen(text:sub(1, res[2]))
         for i=3,#res do
@@ -253,29 +297,13 @@ function tokenizer.tokenize(incoming_syntax, text, state, resume)
         end
         res[1] = char_pos_1
         res[2] = char_pos_2
+        return table.unpack(res)
       end
-      if not res[1] then return end
-      if res[1] and target[3] then
-        -- Check to see if the escaped character is there,
-        -- and if it is not itself escaped.
-        local count = 0
-        for i = res[1] - 1, 1, -1 do
-          if text:ubyte(i) ~= target[3]:ubyte() then break end
-          count = count + 1
-        end
-        if count % 2 == 0 then
-          -- The match is not escaped, so confirm it
-          break
-        else
-          -- The match is escaped, so avoid it
-          res[1] = false
-        end
-      end
-    until at_start or not close or not target[3]
-    return table.unpack(res)
+      return
+    end
   end
 
-  local text_len = text:ulen()
+  local text_len = is_ascii and #text or text:ulen()
   local start_time = system.get_time()
   local starting_i = i
   while i <= text_len do
@@ -284,7 +312,7 @@ function tokenizer.tokenize(incoming_syntax, text, state, resume)
       starting_i = i
       if system.get_time() - start_time > 0.5 / config.fps then
         -- We're out of time
-        push_token(res, "incomplete", string.usub(text, i))
+        push_token(res, "incomplete", is_ascii and text:sub(i) or text:usub(i))
         return res, string.char(0), {
           res = res,
           i = i,
@@ -295,8 +323,8 @@ function tokenizer.tokenize(incoming_syntax, text, state, resume)
     -- continue trying to match the end pattern of a pair if we have a state set
     if current_pattern_idx > 0 then
       local p = current_syntax.patterns[current_pattern_idx]
-      local find_results = { find_text(text, p, i, false, true) }
-      local s, e = find_results[1], find_results[2]
+      local s, e, c1, c2, c3, c4 = find_text(text, p, i, false, true)
+      local find_results = s and (c1 and { s, e, c1, c2, c3, c4 } or { s, e })
       -- Use the first token type specified in the type table for the "middle"
       -- part of the subsyntax.
       local token_type = type(p.type) == "table" and p.type[1] or p.type
@@ -312,7 +340,7 @@ function tokenizer.tokenize(incoming_syntax, text, state, resume)
         -- treat the bit after as a token to be normally parsed
         -- (as it's the syntax delimiter).
         if ss and (s == nil or ss < s) then
-          push_token(res, token_type, text:usub(i, ss - 1))
+          push_token(res, token_type, is_ascii and text:sub(i, ss - 1) or text:usub(i, ss - 1))
           i = ss
           cont = false
         end
@@ -323,14 +351,14 @@ function tokenizer.tokenize(incoming_syntax, text, state, resume)
         if s then
           -- Push remaining token before the end delimiter
           if s > i then
-            push_token(res, token_type, text:usub(i, s - 1))
+            push_token(res, token_type, is_ascii and text:sub(i, s - 1) or text:usub(i, s - 1))
           end
           -- Push the end delimiter
-          push_tokens(res, current_syntax, p, text, find_results)
+          push_tokens(res, current_syntax, p, text, find_results, is_ascii)
           set_subsyntax_pattern_idx(0)
           i = e + 1
         else
-          push_token(res, token_type, text:usub(i))
+          push_token(res, token_type, is_ascii and text:sub(i) or text:usub(i))
           break
         end
       end
@@ -339,10 +367,10 @@ function tokenizer.tokenize(incoming_syntax, text, state, resume)
     -- we're ending early in the middle of a delimiter, or
     -- just normally, upon finding a token.
     while subsyntax_info do
-      local find_results = { find_text(text, subsyntax_info, i, true, true) }
-      local s, e = find_results[1], find_results[2]
+      local s, e, c1, c2, c3, c4 = find_text(text, subsyntax_info, i, true, true)
       if s then
-        push_tokens(res, current_syntax, subsyntax_info, text, find_results)
+        local find_results = c1 and { s, e, c1, c2, c3, c4 } or { s, e }
+        push_tokens(res, current_syntax, subsyntax_info, text, find_results, is_ascii)
         -- On finding unescaped delimiter, pop it.
         pop_subsyntax()
         i = e + 1
@@ -354,10 +382,11 @@ function tokenizer.tokenize(incoming_syntax, text, state, resume)
     -- find matching pattern
     local matched = false
     for n, p in ipairs(current_syntax.patterns) do
-      local find_results = { find_text(text, p, i, true, false) }
-      if find_results[1] then
+      local s, e, c1, c2, c3, c4 = find_text(text, p, i, true, false)
+      if s then
+        local find_results = c1 and { s, e, c1, c2, c3, c4 } or { s, e }
         -- Check for patterns successfully matching nothing
-        if find_results[1] > find_results[2] then
+        if s > e then
           report_bad_pattern(core.warn, current_syntax, n,
               "Pattern successfully matched, but nothing was captured.")
           goto continue
@@ -379,7 +408,7 @@ function tokenizer.tokenize(incoming_syntax, text, state, resume)
         end
 
         -- matched pattern; make and add tokens
-        push_tokens(res, current_syntax, p, text, find_results)
+        push_tokens(res, current_syntax, p, text, find_results, is_ascii)
         -- update state if this was a start|end pattern pair
         if type(p.pattern or p.regex) == "table" then
           -- If we have a subsyntax, push that onto the subsyntax stack.
@@ -390,7 +419,7 @@ function tokenizer.tokenize(incoming_syntax, text, state, resume)
           end
         end
         -- move cursor past this token
-        i = find_results[2] + 1
+        i = e + 1
         matched = true
         break
         ::continue::
@@ -399,7 +428,7 @@ function tokenizer.tokenize(incoming_syntax, text, state, resume)
 
     -- consume character if we didn't match
     if not matched then
-      push_token(res, "normal", text:usub(i, i))
+      push_token(res, "normal", is_ascii and text:sub(i, i) or text:usub(i, i))
       i = i + 1
     end
   end

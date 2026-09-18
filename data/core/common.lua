@@ -158,18 +158,29 @@ local function compare_score(a, b)
   return a.score > b.score
 end
 
+local function item_text(item)
+  local t = type(item)
+  if t == "string" then
+    return item
+  elseif t == "table" and type(item.text) == "string" then
+    return item.text
+  end
+  return tostring(item)
+end
+
 local function fuzzy_match_items(items, needle, files)
   local res = {}
   needle = (PLATFORM == "Windows" and files) and needle:gsub('/', PATHSEP) or needle
   for _, item in ipairs(items) do
-    local score = system.fuzzy_match(tostring(item), needle, files)
+    local text = item_text(item)
+    local score = system.fuzzy_match(text, needle, files)
     if score then
-      table.insert(res, { text = item, score = score })
+      table.insert(res, { item = item, text = text, score = score })
     end
   end
   table.sort(res, compare_score)
-  for i, item in ipairs(res) do
-    res[i] = item.text
+  for i, entry in ipairs(res) do
+    res[i] = entry.item
   end
   return res
 end
@@ -207,7 +218,9 @@ function common.fuzzy_match_with_recents(haystack, recents, needle)
     for i = 2, #recents do
       table.insert(recents_ext, recents[i])
     end
-    table.insert(recents_ext, recents[1])
+    if #recents > 0 then
+      table.insert(recents_ext, recents[1])
+    end
     local others = common.fuzzy_match(haystack, "", true)
     for i = 1, #others do
       table.insert(recents_ext, others[i])

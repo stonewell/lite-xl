@@ -4,9 +4,7 @@
 #include "api.h"
 #include "../renderer.h"
 #include "../rencache.h"
-#ifdef LITE_USE_SDL_RENDERER
 #include "../renwindow.h"
-#endif
 #include "lua.h"
 
 // a reference index to a table that stores the fonts
@@ -117,9 +115,7 @@ static bool font_retrieve(lua_State* L, RenFont** fonts, int idx) {
       lua_pop(L, 1);
     }
   }
-#ifdef LITE_USE_SDL_RENDERER
   update_font_scale(ren_get_target_window(), fonts);
-#endif
   return is_table;
 }
 
@@ -243,12 +239,10 @@ static int f_font_set_size(lua_State *L) {
   RenFont* fonts[FONT_FALLBACK_MAX]; font_retrieve(L, fonts, 1);
   float size = luaL_checknumber(L, 2);
   int scale = 1;
-#ifdef LITE_USE_SDL_RENDERER
   RenWindow *window = ren_get_target_window();
   if (window != NULL) {
     scale = renwin_get_surface(window).scale;
   }
-#endif
   ren_font_group_set_size(fonts, size, scale);
   return 0;
 }
@@ -394,15 +388,48 @@ static int f_draw_text(lua_State *L) {
   return 1;
 }
 
+static int f_get_backend(lua_State *L) {
+  RenWindow *window = ren_get_target_window();
+  if (!window) {
+    RenWindow **window_list;
+    if (ren_get_window_list(&window_list) > 0) {
+      window = window_list[0];
+    }
+  }
+  lua_pushstring(L, renwin_get_renderer_name(window));
+  return 1;
+}
+
+static int f_is_gpu(lua_State *L) {
+  RenWindow *window = ren_get_target_window();
+  if (!window) {
+    RenWindow **window_list;
+    if (ren_get_window_list(&window_list) > 0) {
+      window = window_list[0];
+    }
+  }
+  lua_pushboolean(L, renwin_is_gpu(window));
+  return 1;
+}
+
+static int f_set_software_rendering(lua_State *L) {
+  bool force = lua_toboolean(L, 1);
+  renwin_set_force_software(force);
+  return 0;
+}
+
 static const luaL_Reg lib[] = {
-  { "show_debug",         f_show_debug         },
-  { "get_size",           f_get_size           },
-  { "begin_frame",        f_begin_frame        },
-  { "end_frame",          f_end_frame          },
-  { "set_clip_rect",      f_set_clip_rect      },
-  { "draw_rect",          f_draw_rect          },
-  { "draw_text",          f_draw_text          },
-  { NULL,                 NULL                 }
+  { "show_debug",             f_show_debug             },
+  { "get_size",               f_get_size               },
+  { "begin_frame",            f_begin_frame            },
+  { "end_frame",              f_end_frame              },
+  { "set_clip_rect",          f_set_clip_rect          },
+  { "draw_rect",              f_draw_rect              },
+  { "draw_text",              f_draw_text              },
+  { "get_backend",            f_get_backend            },
+  { "is_gpu",                 f_is_gpu                 },
+  { "set_software_rendering", f_set_software_rendering },
+  { NULL,                     NULL                     }
 };
 
 static const luaL_Reg fontLib[] = {

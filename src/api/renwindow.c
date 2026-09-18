@@ -91,12 +91,26 @@ static int f_renwin_restore(lua_State *L) {
   return 1;
 }
 
+static int f_renwin_is_gpu(lua_State *L) {
+  RenWindow *window_renderer = *(RenWindow**)luaL_checkudata(L, 1, API_TYPE_RENWINDOW);
+  lua_pushboolean(L, renwin_is_gpu(window_renderer));
+  return 1;
+}
+
+static int f_renwin_get_backend(lua_State *L) {
+  RenWindow *window_renderer = *(RenWindow**)luaL_checkudata(L, 1, API_TYPE_RENWINDOW);
+  lua_pushstring(L, renwin_get_renderer_name(window_renderer));
+  return 1;
+}
+
 static const luaL_Reg renwindow_lib[] = {
-  { "create",     f_renwin_create     },
-  { "__gc",       f_renwin_gc         },
-  { "get_size",   f_renwin_get_size   },
-  { "_persist",   f_renwin_persist    },
-  { "_restore",   f_renwin_restore    },
+  { "create",       f_renwin_create       },
+  { "__gc",         f_renwin_gc           },
+  { "get_size",     f_renwin_get_size     },
+  { "is_gpu",       f_renwin_is_gpu       },
+  { "get_backend",  f_renwin_get_backend  },
+  { "_persist",     f_renwin_persist      },
+  { "_restore",     f_renwin_restore      },
   {NULL, NULL}
 };
 

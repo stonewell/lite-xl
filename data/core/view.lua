@@ -310,8 +310,14 @@ function View:update()
   end
 
   self:clamp_scroll_position()
-  self:move_towards(self.scroll, "x", self.scroll.to.x, 0.3, "scroll")
-  self:move_towards(self.scroll, "y", self.scroll.to.y, 0.3, "scroll")
+  local rate = config.scroll_rate or 0.5
+  local diff_y = math.abs(self.scroll.y - self.scroll.to.y)
+  local y_rate = rate
+  if diff_y > self.size.y then
+    y_rate = math.min(0.85, rate * (1 + math.min(1.5, diff_y / self.size.y)))
+  end
+  self:move_towards(self.scroll, "x", self.scroll.to.x, rate, "scroll")
+  self:move_towards(self.scroll, "y", self.scroll.to.y, y_rate, "scroll")
   if not self.scrollable then return end
   self:update_scrollbar()
 end

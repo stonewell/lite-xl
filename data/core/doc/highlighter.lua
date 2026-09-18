@@ -14,7 +14,7 @@ function Highlighter:new(doc)
   self.running = false
   self.cache_order = {}
   self.cache_idx = 1
-  self.max_cache = config.highlighter_cache_size or 1000
+  self.max_cache = config.highlighter_cache_size or 10000
   self:reset()
 end
 
@@ -84,6 +84,7 @@ function Highlighter:reset()
   self.cache_order = {}
   self.cache_idx = 1
   self:soft_reset()
+  self:invalidate(1)
 end
 
 function Highlighter:soft_reset()
@@ -97,7 +98,7 @@ end
 function Highlighter:invalidate(idx)
   self.first_invalid_line = math.min(self.first_invalid_line, idx)
   if not self.doc.large_file and self.doc.syntax and #self.doc.syntax.patterns > 0 then
-    set_max_wanted_lines(self, math.min(self.max_wanted_line, #self.doc.lines))
+    set_max_wanted_lines(self, #self.doc.lines)
   end
 end
 
@@ -132,7 +133,7 @@ function Highlighter:get_line(idx)
     local state = (type(prev) == "table") and prev.state or nil
     line = self:tokenize_line(idx, state)
 
-    if self.doc.large_file or #self.doc.lines > (config.highlighter_cache_size or 1000) then
+    if self.doc.large_file or #self.doc.lines > (config.highlighter_cache_size or 10000) then
       -- Evict oldest entry if cache exceeds maximum allowed lines
       local old_idx = self.cache_order[self.cache_idx]
       if old_idx and old_idx ~= idx then
@@ -146,8 +147,7 @@ function Highlighter:get_line(idx)
     self:update_notify(idx, 0)
   end
   if not self.doc.large_file and self.doc.syntax and #self.doc.syntax.patterns > 0 then
-    -- Restrict eager lookahead to at most 80 lines ahead of requested line
-    set_max_wanted_lines(self, math.min(math.max(self.max_wanted_line, idx + 80), #self.doc.lines))
+    set_max_wanted_lines(self, #self.doc.lines)
   end
   return line
 end

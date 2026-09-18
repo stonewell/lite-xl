@@ -15,7 +15,7 @@ else()
 endif()
 
 option(LITE_USE_SDL_RENDERER
-    "Use SDL renderer backend (required for macOS retina)" OFF)
+    "Use SDL renderer backend with software fallback" ON)
 option(LITE_PORTABLE
     "Portable install layout (data/ sits beside the binary)" ${_lite_portable_default})
 option(LITE_BUNDLE

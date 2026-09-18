@@ -84,9 +84,9 @@ config.large_file_max_lines = 50000
 config.max_line_length_tokens = 4096
 
 ---Maximum token cache entries in Highlighter.
----Defaults to 1000.
+---Defaults to 10000.
 ---@type number
-config.highlighter_cache_size = 1000
+config.highlighter_cache_size = 10000
 
 ---A list of files and directories to ignore.
 ---Each element is a Lua pattern, where patterns ending with a forward slash
@@ -229,6 +229,17 @@ config.disabled_transitions = {
 ---Defaults to 1.
 ---@type number
 config.animation_rate = 1.0
+
+---The scroll transition rate when moving towards target scroll position.
+---Higher values make scrolling faster and settle in fewer frames.
+---Defaults to 0.5.
+---@type number
+config.scroll_rate = 0.5
+
+---Force CPU software rendering instead of GPU rendering.
+---Defaults to false.
+---@type boolean
+config.force_software_renderer = false
 
 ---The caret's blinking period, in seconds.
 ---
