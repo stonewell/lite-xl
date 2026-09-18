@@ -350,7 +350,7 @@ function CommandView:update()
   self:move_towards("suggestions_height", dest, nil, "commandview")
 
   -- update suggestion cursor offset
-  local dest = (self.suggestion_idx - self.suggestions_offset + 1) * self:get_suggestion_line_height()
+  local dest = (self.suggestion_idx - self.suggestions_offset) * self:get_suggestion_line_height()
   self:move_towards("selection_offset", dest, nil, "commandview")
 
   -- update size based on whether this is the active_view
@@ -391,17 +391,17 @@ local function draw_suggestions_box(self)
   if #self.suggestions > 0 then
     renderer.draw_rect(rx, ry, rw, rh, style.background3)
     renderer.draw_rect(rx, ry - dh, rw, dh, style.divider)
-    local y = self.position.y - self.selection_offset - dh
+    local y = ry + self.selection_offset
     renderer.draw_rect(rx, y, rw, lh, style.line_highlight)
   end
 
   -- draw suggestion text
   local first = math.max(self.suggestions_offset, 1)
-  local last = math.min(self.suggestions_offset + config.max_visible_commands, #self.suggestions)
+  local last = math.min(self.suggestions_offset + config.max_visible_commands - 1, #self.suggestions)
   for i=first, last do
     local item = self.suggestions[i]
     local color = (i == self.suggestion_idx) and style.accent or style.text
-    local y = self.position.y - (i - first + 1) * lh - dh
+    local y = ry + (i - first) * lh
     common.draw_text(self:get_font(), color, item.text, nil, x, y, 0, lh)
 
     if item.info then
