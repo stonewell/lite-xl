@@ -74,9 +74,7 @@ static bool renwin_init_software_surface(RenWindow *ren) {
   return true;
 }
 
-static bool setup_renderer(RenWindow *ren, int w, int h) {
-  /* Note that w and h here should always be in pixels and obtained from
-     a call to SDL_GetWindowSizeInPixels(). */
+static bool setup_renderer(RenWindow *ren) {
   if (!ren->renderer) {
     ren->renderer = SDL_CreateRenderer(ren->window, "direct3d11,direct3d12,gpu,vulkan,metal,opengl");
     if (!ren->renderer) {
@@ -87,40 +85,18 @@ static bool setup_renderer(RenWindow *ren, int w, int h) {
       return false;
     }
   }
-  if (ren->texture) {
-    SDL_DestroyTexture(ren->texture);
-    ren->texture = NULL;
-  }
-  ren->texture = SDL_CreateTexture(ren->renderer, ren->rensurface.surface->format, SDL_TEXTUREACCESS_STREAMING, w, h);
-  if (!ren->texture) {
-    fprintf(stderr, "Warning: SDL_CreateTexture failed: %s. Falling back to software rendering.\n", SDL_GetError());
-    SDL_DestroyRenderer(ren->renderer);
-    ren->renderer = NULL;
-    return false;
-  }
-  ren->rensurface.scale = query_surface_scale(ren);
   return true;
 }
 
 static bool renwin_init_gpu_surface(RenWindow *ren) {
-  if (ren->rensurface.surface) {
-    SDL_DestroySurface(ren->rensurface.surface);
-    ren->rensurface.surface = NULL;
-  }
-  int w, h;
-  SDL_GetWindowSizeInPixels(ren->window, &w, &h);
-  SDL_PixelFormat format = SDL_GetWindowPixelFormat(ren->window);
-  ren->rensurface.surface = SDL_CreateSurface(w, h, format == SDL_PIXELFORMAT_UNKNOWN ? SDL_PIXELFORMAT_BGRA32 : format);
-  if (!ren->rensurface.surface) {
-    fprintf(stderr, "Warning: SDL_CreateSurface failed: %s. Falling back to software rendering.\n", SDL_GetError());
-    renwin_cleanup_gpu(ren);
-    return false;
-  }
-  if (!setup_renderer(ren, w, h)) {
+  if (!setup_renderer(ren)) {
     renwin_cleanup_gpu(ren);
     return false;
   }
   ren->is_gpu = true;
+  ren->rensurface.scale = query_surface_scale(ren);
+  ren->rensurface.surface = NULL;
+  ren->texture = NULL;
   ren->scale_x = ren->scale_y = 1;
   return true;
 }
@@ -150,13 +126,27 @@ static RenRect scaled_rect(const RenRect rect, const int scale) {
 }
 
 void renwin_clip_to_surface(RenWindow *ren) {
-  SDL_SetSurfaceClipRect(renwin_get_surface(ren).surface, NULL);
+  if (ren->is_gpu && ren->renderer) {
+    SDL_SetRenderClipRect(ren->renderer, NULL);
+  } else {
+    SDL_SetSurfaceClipRect(renwin_get_surface(ren).surface, NULL);
+  }
 }
 
 void renwin_set_clip_rect(RenWindow *ren, RenRect rect) {
   RenSurface rs = renwin_get_surface(ren);
   RenRect sr = scaled_rect(rect, rs.scale);
-  SDL_SetSurfaceClipRect(rs.surface, &(SDL_Rect){.x = sr.x, .y = sr.y, .w = sr.width, .h = sr.height});
+  if (ren->is_gpu && ren->renderer) {
+    if (sr.width <= 0 || sr.height <= 0) {
+      SDL_Rect empty_rect = { 0, 0, 0, 0 };
+      SDL_SetRenderClipRect(ren->renderer, &empty_rect);
+    } else {
+      SDL_Rect clip = { sr.x, sr.y, sr.width, sr.height };
+      SDL_SetRenderClipRect(ren->renderer, &clip);
+    }
+  } else {
+    SDL_SetSurfaceClipRect(rs.surface, &(SDL_Rect){.x = sr.x, .y = sr.y, .w = sr.width, .h = sr.height});
+  }
 }
 
 RenSurface renwin_get_surface(RenWindow *ren) {
@@ -173,18 +163,8 @@ RenSurface renwin_get_surface(RenWindow *ren) {
 
 void renwin_resize_surface(RenWindow *ren) {
   if (ren->is_gpu) {
-    int new_w, new_h, new_scale;
-    SDL_GetWindowSizeInPixels(ren->window, &new_w, &new_h);
-    new_scale = query_surface_scale(ren);
-    /* Note that (w, h) may differ from (new_w, new_h) on retina displays. */
-    if (new_scale != ren->rensurface.scale ||
-        new_w != ren->rensurface.surface->w ||
-        new_h != ren->rensurface.surface->h) {
-      if (!renwin_init_gpu_surface(ren)) {
-        renwin_init_software_surface(ren);
-      }
-      renwin_clip_to_surface(ren);
-    }
+    ren->rensurface.scale = query_surface_scale(ren);
+    renwin_clip_to_surface(ren);
   } else {
     renwin_init_software_surface(ren);
     renwin_clip_to_surface(ren);
@@ -217,17 +197,9 @@ void renwin_show_window(RenWindow *ren) {
 
 void renwin_update_rects(RenWindow *ren, RenRect *rects, int count) {
   if (ren->is_gpu) {
-    const int scale = ren->rensurface.scale;
-    for (int i = 0; i < count; i++) {
-      const RenRect *r = &rects[i];
-      const int x = scale * r->x, y = scale * r->y;
-      const int w = scale * r->width, h = scale * r->height;
-      const SDL_Rect sr = {.x = x, .y = y, .w = w, .h = h};
-      uint8_t *pixels = ((uint8_t *) ren->rensurface.surface->pixels) + y * ren->rensurface.surface->pitch + x * SDL_BYTESPERPIXEL(ren->rensurface.surface->format);
-      SDL_UpdateTexture(ren->texture, &sr, pixels, ren->rensurface.surface->pitch);
+    if (ren->renderer) {
+      SDL_RenderPresent(ren->renderer);
     }
-    SDL_RenderTexture(ren->renderer, ren->texture, NULL, NULL);
-    SDL_RenderPresent(ren->renderer);
   } else {
     SDL_UpdateWindowSurfaceRects(ren->window, (SDL_Rect*) rects, count);
   }

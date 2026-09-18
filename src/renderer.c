@@ -98,6 +98,8 @@ typedef struct {
 // a bitmap atlas with a fixed width, each surface acting as a bump allocator
 typedef struct {
   SDL_Surface **surfaces;
+  SDL_Texture **textures;
+  bool *texture_dirty;
   unsigned int width, nsurface;
 } GlyphAtlas;
 
@@ -237,6 +239,8 @@ static SDL_Surface *font_allocate_glyph_surface(RenFont *font, FT_GlyphSlot slot
     font->glyphs.atlas[glyph_format][font->glyphs.natlas[glyph_format]] = (GlyphAtlas) {
       .width = metric->x1 + FONT_WIDTH_OVERFLOW_PX, .nsurface = 0,
       .surfaces = NULL,
+      .textures = NULL,
+      .texture_dirty = NULL,
     };
     font->glyphs.bytesize += sizeof(GlyphAtlas);
     atlas_idx = font->glyphs.natlas[glyph_format]++;
@@ -266,10 +270,14 @@ static SDL_Surface *font_allocate_glyph_surface(RenFont *font, FT_GlyphSlot slot
     SDL_PixelFormat format = glyphformat_to_pixelformat(glyph_format, &depth);
     atlas->surfaces = check_alloc(SDL_realloc(atlas->surfaces, sizeof(SDL_Surface *) * (atlas->nsurface + 1)));
     atlas->surfaces[atlas->nsurface] = check_alloc(SDL_CreateSurface(atlas->width, GLYPHS_PER_ATLAS * h, format));
+    atlas->textures = check_alloc(SDL_realloc(atlas->textures, sizeof(SDL_Texture *) * (atlas->nsurface + 1)));
+    atlas->textures[atlas->nsurface] = NULL;
+    atlas->texture_dirty = check_alloc(SDL_realloc(atlas->texture_dirty, sizeof(bool) * (atlas->nsurface + 1)));
+    atlas->texture_dirty[atlas->nsurface] = false;
     userdata = SDL_GetSurfaceProperties(atlas->surfaces[atlas->nsurface]);
     SDL_SetPointerProperty(userdata, "metric", NULL);
     surface_idx = atlas->nsurface++;
-    font->glyphs.bytesize += (sizeof(SDL_Surface *) + sizeof(SDL_Surface) + atlas->width * GLYPHS_PER_ATLAS * h * glyph_format);
+    font->glyphs.bytesize += (sizeof(SDL_Surface *) + sizeof(SDL_Texture *) + sizeof(bool) + sizeof(SDL_Surface) + atlas->width * GLYPHS_PER_ATLAS * h * glyph_format);
   }
   metric->surface_idx = surface_idx;
   userdata = SDL_GetSurfaceProperties(atlas->surfaces[surface_idx]);
@@ -354,6 +362,7 @@ static SDL_Surface *font_load_glyph_bitmap(RenFont *font, unsigned int glyph_id,
       memcpy(&pixels[target_offset], &slot->bitmap.buffer[source_offset], slot->bitmap.width);
     }
   }
+  font->glyphs.atlas[metric->format][metric->atlas_idx].texture_dirty[metric->surface_idx] = true;
   return surface;
 }
 
@@ -391,8 +400,13 @@ static void font_clear_glyph_cache(RenFont* font) {
       GlyphAtlas *atlas = &font->glyphs.atlas[glyph_format_idx][atlas_idx];
       for (int surface_idx = 0; surface_idx < atlas->nsurface; surface_idx++) {
         SDL_DestroySurface(atlas->surfaces[surface_idx]);
+        if (atlas->textures && atlas->textures[surface_idx]) {
+          SDL_DestroyTexture(atlas->textures[surface_idx]);
+        }
       }
       SDL_free(atlas->surfaces);
+      SDL_free(atlas->textures);
+      SDL_free(atlas->texture_dirty);
     }
     SDL_free(font->glyphs.atlas[glyph_format_idx]);
     font->glyphs.atlas[glyph_format_idx] = NULL;
@@ -406,6 +420,85 @@ static void font_clear_glyph_cache(RenFont* font) {
     }
   }
   font->glyphs.bytesize = 0;
+}
+
+static uint8_t *atlas_rgba_buf = NULL;
+static size_t atlas_rgba_cap = 0;
+
+static void upload_glyph_atlas_texture(SDL_Texture *tex, SDL_Surface *surface, ERenGlyphFormat format) {
+  size_t needed = (size_t)surface->w * surface->h * 4;
+  if (needed > atlas_rgba_cap) {
+    atlas_rgba_buf = check_alloc(SDL_realloc(atlas_rgba_buf, needed));
+    atlas_rgba_cap = needed;
+  }
+  int w = surface->w;
+  int h = surface->h;
+  for (int y = 0; y < h; y++) {
+    uint8_t *src_row = (uint8_t*)surface->pixels + y * surface->pitch;
+    uint8_t *dst_row = atlas_rgba_buf + y * w * 4;
+    if (format == EGlyphFormatSubpixel) {
+      for (int x = 0; x < w; x++) {
+        uint8_t r = src_row[x * 3 + 0];
+        uint8_t g = src_row[x * 3 + 1];
+        uint8_t b = src_row[x * 3 + 2];
+        uint8_t c = (uint8_t)(((unsigned int)r * 77 + (unsigned int)g * 150 + (unsigned int)b * 29) >> 8);
+        dst_row[x * 4 + 0] = 255;
+        dst_row[x * 4 + 1] = 255;
+        dst_row[x * 4 + 2] = 255;
+        dst_row[x * 4 + 3] = c;
+      }
+    } else {
+      for (int x = 0; x < w; x++) {
+        uint8_t c = src_row[x];
+        dst_row[x * 4 + 0] = 255;
+        dst_row[x * 4 + 1] = 255;
+        dst_row[x * 4 + 2] = 255;
+        dst_row[x * 4 + 3] = c;
+      }
+    }
+  }
+  SDL_UpdateTexture(tex, NULL, atlas_rgba_buf, w * 4);
+}
+
+static SDL_Texture *font_get_glyph_texture(RenWindow *ren, RenFont *font, GlyphMetric *metric) {
+  if (!ren || !ren->renderer || !metric) return NULL;
+  GlyphAtlas *atlas = &font->glyphs.atlas[metric->format][metric->atlas_idx];
+  int sidx = metric->surface_idx;
+  if (sidx < 0 || (unsigned int)sidx >= atlas->nsurface) return NULL;
+  SDL_Surface *surface = atlas->surfaces[sidx];
+  if (!surface) return NULL;
+
+  if (atlas->textures[sidx]) {
+    if (SDL_GetRendererFromTexture(atlas->textures[sidx]) != ren->renderer) {
+      SDL_DestroyTexture(atlas->textures[sidx]);
+      atlas->textures[sidx] = NULL;
+      atlas->texture_dirty[sidx] = true;
+    }
+  }
+
+  if (!atlas->textures[sidx]) {
+    atlas->textures[sidx] = SDL_CreateTexture(
+      ren->renderer,
+      SDL_PIXELFORMAT_RGBA32,
+      SDL_TEXTUREACCESS_STATIC,
+      surface->w,
+      surface->h
+    );
+    if (!atlas->textures[sidx]) {
+      fprintf(stderr, "Failed to create glyph texture: %s\n", SDL_GetError());
+      return NULL;
+    }
+    SDL_SetTextureBlendMode(atlas->textures[sidx], SDL_BLENDMODE_BLEND);
+    SDL_SetTextureScaleMode(atlas->textures[sidx], SDL_SCALEMODE_NEAREST);
+    atlas->texture_dirty[sidx] = true;
+  }
+
+  if (atlas->texture_dirty[sidx]) {
+    upload_glyph_atlas_texture(atlas->textures[sidx], surface, metric->format);
+    atlas->texture_dirty[sidx] = false;
+  }
+
+  return atlas->textures[sidx];
 }
 
 // based on https://github.com/libsdl-org/SDL_ttf/blob/2a094959055fba09f7deed6e1ffeb986188982ae/SDL_ttf.c#L1735
@@ -705,6 +798,78 @@ double ren_draw_text(RenSurface *rs, RenFont **fonts, const char *text, size_t l
   return pen_x / surface_scale;
 }
 
+double ren_draw_text_gpu(RenWindow *ren, RenFont **fonts, const char *text, size_t len, float x, int y, RenColor color, RenTab tab) {
+  if (!ren || !ren->renderer) return x;
+
+  const int surface_scale = ren->rensurface.scale > 0 ? ren->rensurface.scale : 1;
+  double pen_x = x * surface_scale;
+  double original_pen_x = pen_x;
+  int scaled_y = y * surface_scale;
+  const char* end = text + len;
+
+  RenFont* last = NULL;
+  double last_pen_x = x;
+  bool underline = fonts[0]->style & FONT_STYLE_UNDERLINE;
+  bool strikethrough = fonts[0]->style & FONT_STYLE_STRIKETHROUGH;
+
+  SDL_Texture *last_tex = NULL;
+
+  while (text < end) {
+    unsigned int codepoint;
+    text = utf8_to_codepoint(text, end, &codepoint);
+    SDL_Surface *font_surface = NULL;
+    GlyphMetric *metric = NULL;
+    RenFont* font = font_group_get_glyph(fonts, codepoint, (int)(fmod(pen_x, 1.0) * SUBPIXEL_BITMAPS_CACHED), &font_surface, &metric);
+    if (!metric)
+      break;
+
+    int start_x = (int)floor(pen_x) + metric->bitmap_left;
+    int target_y = scaled_y - metric->bitmap_top + (fonts[0]->baseline * surface_scale);
+
+    if (!font_surface && !is_whitespace(codepoint)) {
+      ren_draw_rect_gpu(ren, (RenRect){ (int)((start_x + 1) / surface_scale), y, (int)(font->space_advance - 1), ren_font_group_get_height(fonts) }, color);
+    } else if (!is_whitespace(codepoint) && font_surface && color.a > 0 && metric->x1 > 0 && (metric->y1 > metric->y0)) {
+      SDL_Texture *tex = font_get_glyph_texture(ren, font, metric);
+      if (tex) {
+        if (tex != last_tex) {
+          SDL_SetTextureColorMod(tex, color.r, color.g, color.b);
+          SDL_SetTextureAlphaMod(tex, color.a);
+          last_tex = tex;
+        }
+        SDL_FRect srcrect = {
+          0.0f,
+          (float)metric->y0,
+          (float)metric->x1,
+          (float)(metric->y1 - metric->y0)
+        };
+        SDL_FRect dstrect = {
+          (float)start_x,
+          (float)target_y,
+          (float)metric->x1,
+          (float)(metric->y1 - metric->y0)
+        };
+        SDL_RenderTexture(ren->renderer, tex, &srcrect, &dstrect);
+      }
+    }
+
+    float adv = font_get_xadvance(fonts[0], codepoint, metric, pen_x - original_pen_x, tab);
+
+    if (!last) last = font;
+    else if (font != last || text == end) {
+      double local_pen_x = (text == end ? pen_x + adv : pen_x) / surface_scale;
+      if (underline)
+        ren_draw_rect_gpu(ren, (RenRect){ (int)last_pen_x, y + last->height - 1, (int)(local_pen_x - last_pen_x), last->underline_thickness }, color);
+      if (strikethrough)
+        ren_draw_rect_gpu(ren, (RenRect){ (int)last_pen_x, y + last->height / 2, (int)(local_pen_x - last_pen_x), last->underline_thickness }, color);
+      last = font;
+      last_pen_x = pen_x / surface_scale;
+    }
+
+    pen_x += adv;
+  }
+  return pen_x / surface_scale;
+}
+
 /******************* Rectangles **********************/
 static inline RenColor blend_pixel(RenColor dst, RenColor src) {
   int ia = 0xff - src.a;
@@ -739,6 +904,27 @@ void ren_draw_rect(RenSurface *rs, RenRect rect, RenColor color) {
     *pixel = SDL_MapSurfaceRGBA(draw_rect_surface, color.r, color.g, color.b, color.a);
     SDL_BlitSurfaceScaled(draw_rect_surface, NULL, surface, &dest_rect, SDL_SCALEMODE_LINEAR);
   }
+}
+
+void ren_draw_rect_gpu(RenWindow *ren, RenRect rect, RenColor color) {
+  if (color.a == 0 || !ren || !ren->renderer) return;
+  if (rect.width <= 0 || rect.height <= 0) return;
+
+  const int scale = ren->rensurface.scale > 0 ? ren->rensurface.scale : 1;
+  SDL_FRect dest_rect = {
+    (float)(rect.x * scale),
+    (float)(rect.y * scale),
+    (float)(rect.width * scale),
+    (float)(rect.height * scale)
+  };
+
+  if (color.a == 255) {
+    SDL_SetRenderDrawBlendMode(ren->renderer, SDL_BLENDMODE_NONE);
+  } else {
+    SDL_SetRenderDrawBlendMode(ren->renderer, SDL_BLENDMODE_BLEND);
+  }
+  SDL_SetRenderDrawColor(ren->renderer, color.r, color.g, color.b, color.a);
+  SDL_RenderFillRect(ren->renderer, &dest_rect);
 }
 
 /*************** Window Management ****************/
@@ -798,6 +984,11 @@ int ren_init(void) {
 }
 
 void ren_free(void) {
+  if (atlas_rgba_buf) {
+    SDL_free(atlas_rgba_buf);
+    atlas_rgba_buf = NULL;
+    atlas_rgba_cap = 0;
+  }
   SDL_DestroySurface(draw_rect_surface);
   FT_Done_FreeType(library);
 }
@@ -847,6 +1038,15 @@ void ren_set_clip_rect(RenWindow *window_renderer, RenRect rect) {
 
 
 void ren_get_size(RenWindow *window_renderer, int *x, int *y) {
+  if (!window_renderer) {
+    if (x) *x = 0;
+    if (y) *y = 0;
+    return;
+  }
+  if (window_renderer->is_gpu) {
+    SDL_GetWindowSize(window_renderer->window, x, y);
+    return;
+  }
   RenSurface rs = renwin_get_surface(window_renderer);
   *x = rs.surface->w;
   *y = rs.surface->h;

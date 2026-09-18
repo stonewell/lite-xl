@@ -303,41 +303,82 @@ void rencache_end_frame(RenWindow *window_renderer) {
     *r = intersect_rects(*r, screen_rect);
   }
 
-  RenSurface rs = renwin_get_surface(window_renderer);
-  /* redraw updated regions */
-  for (int i = 0; i < rect_count; i++) {
-    /* draw */
-    RenRect r = rect_buf[i];
-    ren_set_clip_rect(window_renderer, r);
+  if (window_renderer->is_gpu) {
+    if (rect_count > 0) {
+      SDL_SetRenderClipRect(window_renderer->renderer, NULL);
+      SDL_SetRenderDrawColor(window_renderer->renderer, 0, 0, 0, 255);
+      SDL_RenderClear(window_renderer->renderer);
 
-    cmd = NULL;
-    while (next_command(window_renderer, &cmd)) {
-      SetClipCommand *ccmd = (SetClipCommand*)&cmd->command;
-      DrawRectCommand *rcmd = (DrawRectCommand*)&cmd->command;
-      DrawTextCommand *tcmd = (DrawTextCommand*)&cmd->command;
-      switch (cmd->type) {
-        case SET_CLIP:
-          ren_set_clip_rect(window_renderer, intersect_rects(ccmd->rect, r));
-          break;
-        case DRAW_RECT:
-          ren_draw_rect(&rs, rcmd->rect, rcmd->color);
-          break;
-        case DRAW_TEXT:
-          ren_font_group_set_tab_size(tcmd->fonts, tcmd->tab_size);
-          ren_draw_text(&rs, tcmd->fonts, tcmd->text, tcmd->len, tcmd->text_x, tcmd->rect.y, tcmd->color, tcmd->tab);
-          break;
+      cmd = NULL;
+      while (next_command(window_renderer, &cmd)) {
+        SetClipCommand *ccmd = (SetClipCommand*)&cmd->command;
+        DrawRectCommand *rcmd = (DrawRectCommand*)&cmd->command;
+        DrawTextCommand *tcmd = (DrawTextCommand*)&cmd->command;
+        switch (cmd->type) {
+          case SET_CLIP:
+            ren_set_clip_rect(window_renderer, ccmd->rect);
+            break;
+          case DRAW_RECT:
+            ren_draw_rect_gpu(window_renderer, rcmd->rect, rcmd->color);
+            break;
+          case DRAW_TEXT:
+            ren_font_group_set_tab_size(tcmd->fonts, tcmd->tab_size);
+            ren_draw_text_gpu(window_renderer, tcmd->fonts, tcmd->text, tcmd->len, tcmd->text_x, tcmd->rect.y, tcmd->color, tcmd->tab);
+            break;
+        }
+      }
+
+      if (show_debug) {
+        SDL_SetRenderClipRect(window_renderer->renderer, NULL);
+        for (int i = 0; i < rect_count; i++) {
+          RenColor color = { (uint8_t)rand(), (uint8_t)rand(), (uint8_t)rand(), 50 };
+          ren_draw_rect_gpu(window_renderer, rect_buf[i], color);
+        }
+      }
+
+      SDL_RenderPresent(window_renderer->renderer);
+
+      if (SDL_GetWindowFlags(window_renderer->window) & SDL_WINDOW_HIDDEN) {
+        renwin_show_window(window_renderer);
+      }
+    }
+  } else {
+    RenSurface rs = renwin_get_surface(window_renderer);
+    /* redraw updated regions */
+    for (int i = 0; i < rect_count; i++) {
+      /* draw */
+      RenRect r = rect_buf[i];
+      ren_set_clip_rect(window_renderer, r);
+
+      cmd = NULL;
+      while (next_command(window_renderer, &cmd)) {
+        SetClipCommand *ccmd = (SetClipCommand*)&cmd->command;
+        DrawRectCommand *rcmd = (DrawRectCommand*)&cmd->command;
+        DrawTextCommand *tcmd = (DrawTextCommand*)&cmd->command;
+        switch (cmd->type) {
+          case SET_CLIP:
+            ren_set_clip_rect(window_renderer, intersect_rects(ccmd->rect, r));
+            break;
+          case DRAW_RECT:
+            ren_draw_rect(&rs, rcmd->rect, rcmd->color);
+            break;
+          case DRAW_TEXT:
+            ren_font_group_set_tab_size(tcmd->fonts, tcmd->tab_size);
+            ren_draw_text(&rs, tcmd->fonts, tcmd->text, tcmd->len, tcmd->text_x, tcmd->rect.y, tcmd->color, tcmd->tab);
+            break;
+        }
+      }
+
+      if (show_debug) {
+        RenColor color = { rand(), rand(), rand(), 50 };
+        ren_draw_rect(&rs, r, color);
       }
     }
 
-    if (show_debug) {
-      RenColor color = { rand(), rand(), rand(), 50 };
-      ren_draw_rect(&rs, r, color);
+    /* update dirty rects */
+    if (rect_count > 0) {
+      ren_update_rects(window_renderer, rect_buf, rect_count);
     }
-  }
-
-  /* update dirty rects */
-  if (rect_count > 0) {
-    ren_update_rects(window_renderer, rect_buf, rect_count);
   }
 
   /* swap cell buffer and reset */
