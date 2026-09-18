@@ -9,6 +9,7 @@
 
 // a reference index to a table that stores the fonts
 static int RENDERER_FONT_REF = LUA_NOREF;
+static RenFont* last_referenced_font = NULL;
 
 static int font_get_options(
   lua_State *L,
@@ -194,6 +195,9 @@ static int f_font_set_tab_size(lua_State *L) {
 static int f_font_gc(lua_State *L) {
   if (lua_istable(L, 1)) return 0; // do not run if its FontGroup
   RenFont** self = luaL_checkudata(L, 1, API_TYPE_FONT);
+  if (*self == last_referenced_font) {
+    last_referenced_font = NULL;
+  }
   ren_font_free(*self);
 
   return 0;
@@ -205,11 +209,17 @@ static RenTab checktab(lua_State *L, int idx) {
   if (lua_isnoneornil(L, idx)) {
     return tab;
   }
+  if (lua_isnumber(L, idx)) {
+    tab.offset = lua_tonumber(L, idx);
+    return tab;
+  }
   luaL_checktype(L, idx, LUA_TTABLE);
   if (lua_getfield(L, idx, "tab_offset") == LUA_TNIL) {
+    lua_pop(L, 1);
     return tab;
   }
   tab.offset = luaL_checknumber(L, -1);
+  lua_pop(L, 1);
   return tab;
 }
 
@@ -328,6 +338,7 @@ static int f_end_frame(UNUSED lua_State *L) {
   // clear the font reference table
   lua_newtable(L);
   lua_rawseti(L, LUA_REGISTRYINDEX, RENDERER_FONT_REF);
+  last_referenced_font = NULL;
   return 0;
 }
 
@@ -365,24 +376,34 @@ static int f_draw_text(lua_State *L) {
   RenFont* fonts[FONT_FALLBACK_MAX];
   font_retrieve(L, fonts, 1);
 
-  // stores a reference to this font to the reference table
-  lua_rawgeti(L, LUA_REGISTRYINDEX, RENDERER_FONT_REF);
-  if (lua_istable(L, -1))
-  {
-    lua_pushvalue(L, 1);
-    lua_pushboolean(L, 1);
-    lua_rawset(L, -3);
-  } else {
-    fprintf(stderr, "warning: failed to reference count fonts\n");
+  if (fonts[0] != last_referenced_font) {
+    // stores a reference to this font to the reference table
+    lua_rawgeti(L, LUA_REGISTRYINDEX, RENDERER_FONT_REF);
+    if (lua_istable(L, -1))
+    {
+      lua_pushvalue(L, 1);
+      lua_pushboolean(L, 1);
+      lua_rawset(L, -3);
+    } else {
+      fprintf(stderr, "warning: failed to reference count fonts\n");
+    }
+    lua_pop(L, 1);
+    last_referenced_font = fonts[0];
   }
-  lua_pop(L, 1);
 
   size_t len;
   const char *text = luaL_checklstring(L, 2, &len);
+  while (len > 0 && (text[len - 1] == '\n' || text[len - 1] == '\r')) {
+    len--;
+  }
   double x = luaL_checknumber(L, 3);
   int y = luaL_checknumber(L, 4);
   RenColor color = checkcolor(L, 5, 255);
   RenTab tab = checktab(L, 6);
+  if (len == 0) {
+    lua_pushnumber(L, x);
+    return 1;
+  }
   x = rencache_draw_text(ren_get_target_window(), fonts, text, len, x, y, color, tab);
   lua_pushnumber(L, x);
   return 1;

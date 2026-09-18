@@ -17,6 +17,14 @@ function DocView:__tostring() return "DocView" end
 
 DocView.context = "session"
 
+local line_strings = setmetatable({}, {
+  __index = function(t, k)
+    local s = tostring(k)
+    t[k] = s
+    return s
+  end
+})
+
 local function move_to_line_offset(dv, line, col, offset)
   local xo = dv.last_x_offset
   if xo.line ~= line or xo.col ~= col then
@@ -198,7 +206,7 @@ function DocView:get_col_x_offset(line, col)
     if font ~= default_font then font:set_tab_size(indent_size) end
     local length = #text
     if column + length <= col then
-      xoffset = xoffset + font:get_width(text, {tab_offset = xoffset})
+      xoffset = xoffset + font:get_width(text, xoffset)
       column = column + length
       if column >= col then
         return xoffset
@@ -208,7 +216,7 @@ function DocView:get_col_x_offset(line, col)
         if column >= col then
           return xoffset
         end
-        xoffset = xoffset + font:get_width(char, {tab_offset = xoffset})
+        xoffset = xoffset + font:get_width(char, xoffset)
         column = column + #char
       end
     end
@@ -235,7 +243,7 @@ function DocView:get_x_offset_col(line, x)
   for _, type, text in self.doc.highlighter:each_token(line) do
     local font = style.syntax_fonts[type] or default_font
     if font ~= default_font then font:set_tab_size(indent_size) end
-    local width = font:get_width(text, {tab_offset = xoffset})
+    local width = font:get_width(text, xoffset)
     -- Don't take the shortcut if the width matches x,
     -- because we need last_i which should be calculated using utf-8.
     if xoffset + width < x then
@@ -243,7 +251,7 @@ function DocView:get_x_offset_col(line, x)
       i = i + #text
     else
       for char in common.utf8_chars(text) do
-        local w = font:get_width(char, {tab_offset = xoffset})
+        local w = font:get_width(char, xoffset)
         if xoffset + w >= x then
           return (x <= xoffset + (w / 2)) and i or i + #char
         end
@@ -470,19 +478,12 @@ end
 function DocView:draw_line_text(line, x, y)
   local default_font = self:get_font()
   local tx, ty = x, y + self:get_line_text_y_offset()
-  local last_token = nil
   local tokens = self.doc.highlighter:get_line(line).tokens
-  local tokens_count = #tokens
-  if string.sub(tokens[tokens_count], -1) == "\n" then
-    last_token = tokens_count - 1
-  end
   local start_tx = tx
-  for tidx, type, text in tokenizer.each_token(tokens) do
+  for _, type, text in tokenizer.each_token(tokens) do
     local color = style.syntax[type]
     local font = style.syntax_fonts[type] or default_font
-    -- do not render newline, fixes issue #1164
-    if tidx == last_token then text = text:sub(1, -2) end
-    tx = renderer.draw_text(font, text, tx, ty, color, {tab_offset = tx - start_tx})
+    tx = renderer.draw_text(font, text, tx, ty, color, tx - start_tx)
     if tx > self.position.x + self.size.x then break end
   end
   return self:get_line_height()
@@ -501,64 +502,115 @@ function DocView:draw_caret(x, y)
 end
 
 function DocView:draw_line_body(line, x, y)
-  -- draw highlight if any selection ends on this line
+  local state = self._draw_state
+  local lh = (state and state.lh) or self:get_line_height()
+
+  -- draw highlight if current line
   local draw_highlight = false
-  local hcl = config.highlight_current_line
-  local sels = self.doc.selections
-  if hcl ~= false then
-    if #sels == 4 then
-      local line1, col1, line2, col2 = sels[1], sels[2], sels[3], sels[4]
-      if line1 == line then
-        if hcl ~= "no_selection" or (line1 == line2 and col1 == col2) then
-          draw_highlight = true
+  if state then
+    if state.is_active and state.hcl ~= false then
+      if state.is_single then
+        if state.cur_line == line then
+          if state.hcl ~= "no_selection" or not state.has_selection then
+            draw_highlight = true
+          end
+        end
+      else
+        for _, line1, col1, line2, col2 in self.doc:get_selections(false) do
+          if line1 == line then
+            if state.hcl ~= "no_selection" or (line1 == line2 and col1 == col2) then
+              draw_highlight = true
+            end
+            break
+          end
         end
       end
-    else
-      for lidx, line1, col1, line2, col2 in self.doc:get_selections(false) do
+    end
+  else
+    local hcl = config.highlight_current_line
+    local sels = self.doc.selections
+    if hcl ~= false and core.active_view == self then
+      if #sels == 4 then
+        local line1, col1, line2, col2 = sels[1], sels[2], sels[3], sels[4]
         if line1 == line then
-          if hcl == "no_selection" then
-            if (line1 ~= line2) or (col1 ~= col2) then
-              draw_highlight = false
-              break
-            end
+          if hcl ~= "no_selection" or (line1 == line2 and col1 == col2) then
+            draw_highlight = true
           end
-          draw_highlight = true
-          break
+        end
+      else
+        for _, line1, col1, line2, col2 in self.doc:get_selections(false) do
+          if line1 == line then
+            if hcl ~= "no_selection" or (line1 == line2 and col1 == col2) then
+              draw_highlight = true
+            end
+            break
+          end
         end
       end
     end
   end
-  if draw_highlight and core.active_view == self then
+
+  if draw_highlight then
     self:draw_line_highlight(x + self.scroll.x, y)
   end
 
   -- draw selection if it overlaps this line
-  local lh = self:get_line_height()
-  if #sels == 4 then
-    local line1, col1, line2, col2 = sels[1], sels[2], sels[3], sels[4]
-    if line2 < line1 or (line2 == line1 and col2 < col1) then
-      line1, col1, line2, col2 = line2, col2, line1, col1
-    end
-    if line >= line1 and line <= line2 then
-      local text = self.doc.lines[line]
-      if line1 ~= line then col1 = 1 end
-      if line2 ~= line then col2 = #text + 1 end
-      local x1 = x + self:get_col_x_offset(line, col1)
-      local x2 = x + self:get_col_x_offset(line, col2)
-      if x1 ~= x2 then
-        renderer.draw_rect(x1, y, x2 - x1, lh, style.selection)
-      end
-    end
-  else
-    for lidx, line1, col1, line2, col2 in self.doc:get_selections(true) do
-      if line >= line1 and line <= line2 then
+  if state then
+    if state.is_single then
+      if state.has_selection and line >= state.sel_l1 and line <= state.sel_l2 then
         local text = self.doc.lines[line]
-        if line1 ~= line then col1 = 1 end
-        if line2 ~= line then col2 = #text + 1 end
+        local col1 = (state.sel_l1 == line) and state.sel_c1 or 1
+        local col2 = (state.sel_l2 == line) and state.sel_c2 or (#text + 1)
         local x1 = x + self:get_col_x_offset(line, col1)
         local x2 = x + self:get_col_x_offset(line, col2)
         if x1 ~= x2 then
           renderer.draw_rect(x1, y, x2 - x1, lh, style.selection)
+        end
+      end
+    else
+      for _, line1, col1, line2, col2 in self.doc:get_selections(true) do
+        if line >= line1 and line <= line2 then
+          local text = self.doc.lines[line]
+          if line1 ~= line then col1 = 1 end
+          if line2 ~= line then col2 = #text + 1 end
+          local x1 = x + self:get_col_x_offset(line, col1)
+          local x2 = x + self:get_col_x_offset(line, col2)
+          if x1 ~= x2 then
+            renderer.draw_rect(x1, y, x2 - x1, lh, style.selection)
+          end
+        end
+      end
+    end
+  else
+    local sels = self.doc.selections
+    if #sels == 4 then
+      local line1, col1, line2, col2 = sels[1], sels[2], sels[3], sels[4]
+      if line1 ~= line2 or col1 ~= col2 then
+        if line2 < line1 or (line2 == line1 and col2 < col1) then
+          line1, col1, line2, col2 = line2, col2, line1, col1
+        end
+        if line >= line1 and line <= line2 then
+          local text = self.doc.lines[line]
+          if line1 ~= line then col1 = 1 end
+          if line2 ~= line then col2 = #text + 1 end
+          local x1 = x + self:get_col_x_offset(line, col1)
+          local x2 = x + self:get_col_x_offset(line, col2)
+          if x1 ~= x2 then
+            renderer.draw_rect(x1, y, x2 - x1, lh, style.selection)
+          end
+        end
+      end
+    else
+      for _, line1, col1, line2, col2 in self.doc:get_selections(true) do
+        if line >= line1 and line <= line2 then
+          local text = self.doc.lines[line]
+          if line1 ~= line then col1 = 1 end
+          if line2 ~= line then col2 = #text + 1 end
+          local x1 = x + self:get_col_x_offset(line, col1)
+          local x2 = x + self:get_col_x_offset(line, col2)
+          if x1 ~= x2 then
+            renderer.draw_rect(x1, y, x2 - x1, lh, style.selection)
+          end
         end
       end
     end
@@ -570,25 +622,54 @@ end
 
 
 function DocView:draw_line_gutter(line, x, y, width)
+  local state = self._draw_state
   local color = style.line_number
-  local sels = self.doc.selections
-  if #sels == 4 then
-    local line1, line2 = sels[1], sels[3]
-    if line2 < line1 then line1, line2 = line2, line1 end
-    if line >= line1 and line <= line2 then
+  if state and state.is_single then
+    if state.has_selection then
+      if line >= state.sel_l1 and line <= state.sel_l2 then
+        color = style.line_number2
+      end
+    elseif line == state.cur_line then
       color = style.line_number2
     end
   else
-    for _, line1, _, line2 in self.doc:get_selections(true) do
+    local sels = self.doc.selections
+    if #sels == 4 then
+      local line1, line2 = sels[1], sels[3]
+      if line2 < line1 then line1, line2 = line2, line1 end
       if line >= line1 and line <= line2 then
         color = style.line_number2
-        break
+      end
+    else
+      for _, line1, _, line2 in self.doc:get_selections(true) do
+        if line >= line1 and line <= line2 then
+          color = style.line_number2
+          break
+        end
       end
     end
   end
+
   x = x + style.padding.x
-  local lh = self:get_line_height()
-  common.draw_text(self:get_font(), color, line, "right", x, y, width, lh)
+  local font = (state and state.font) or self:get_font()
+  local digit_w = self._cached_digit_w
+  if not digit_w or self._cached_font ~= font then
+    digit_w = font:get_width("0")
+    self._cached_digit_w = digit_w
+    self._cached_font = font
+  end
+  local digits = line < 10 and 1
+    or (line < 100 and 2)
+    or (line < 1000 and 3)
+    or (line < 10000 and 4)
+    or (line < 100000 and 5)
+    or (line < 1000000 and 6)
+    or (math.floor(math.log10(line)) + 1)
+  local tw = digits * digit_w
+  local draw_x = x + (width - tw)
+  local tyo = (state and state.tyo) or self:get_line_text_y_offset()
+  local lh = (state and state.lh) or self:get_line_height()
+  renderer.draw_text(font, line_strings[line], draw_x, y + tyo, color)
   return lh
 end
 
@@ -646,15 +727,49 @@ end
 function DocView:draw()
   self:draw_background(style.background)
   local _, indent_size = self.doc:get_indent_info()
-  self:get_font():set_tab_size(indent_size)
+  local font = self:get_font()
+  font:set_tab_size(indent_size)
 
   local minline, maxline = self:get_visible_line_range()
   local lh = self:get_line_height()
 
+  local sels = self.doc.selections
+  local is_single = (#sels == 4)
+  local has_selection = false
+  local sel_l1, sel_c1, sel_l2, sel_c2
+  local cur_line = sels[1]
+  if is_single then
+    local l1, c1, l2, c2 = sels[1], sels[2], sels[3], sels[4]
+    if l1 ~= l2 or c1 ~= c2 then
+      has_selection = true
+      if l2 < l1 or (l2 == l1 and c2 < c1) then
+        sel_l1, sel_c1, sel_l2, sel_c2 = l2, c2, l1, c1
+      else
+        sel_l1, sel_c1, sel_l2, sel_c2 = l1, c1, l2, c2
+      end
+    end
+  end
+
+  local state = self._draw_state or {}
+  state.font = font
+  state.lh = lh
+  state.tyo = self:get_line_text_y_offset()
+  state.is_single = is_single
+  state.has_selection = has_selection
+  state.cur_line = cur_line
+  state.sel_l1 = sel_l1
+  state.sel_c1 = sel_c1
+  state.sel_l2 = sel_l2
+  state.sel_c2 = sel_c2
+  state.hcl = config.highlight_current_line
+  state.is_active = (core.active_view == self)
+  self._draw_state = state
+
   local x, y = self:get_line_screen_position(minline)
   local gw, gpad = self:get_gutter_width()
+  local gutter_w = gpad and gw - gpad or gw
   for i = minline, maxline do
-    y = y + (self:draw_line_gutter(i, self.position.x, y, gpad and gw - gpad or gw) or lh)
+    y = y + (self:draw_line_gutter(i, self.position.x, y, gutter_w) or lh)
   end
 
   local pos = self.position

@@ -18,6 +18,12 @@ local Project
 
 local core = {}
 
+local clip_pool = {}
+for i = 1, 64 do
+  clip_pool[i] = { 0, 0, 0, 0 }
+end
+local clip_top = 1
+
 local function load_session()
   local ok, t = pcall(dofile, USERDIR .. PATHSEP .. "session.lua")
   return ok and t or {}
@@ -314,7 +320,8 @@ function core.init()
   core.ensure_user_directory()
 
   core.frame_start = 0
-  core.clip_rect_stack = {{ 0,0,0,0 }}
+  core.clip_rect_stack = { clip_pool[1] }
+  clip_top = 1
   core.docs = {}
   core.projects = {}
   core.cursor_clipboard = {}
@@ -726,20 +733,29 @@ end
 
 
 function core.push_clip_rect(x, y, w, h)
-  local x2, y2, w2, h2 = table.unpack(core.clip_rect_stack[#core.clip_rect_stack])
+  local cur = core.clip_rect_stack[clip_top]
+  local x2, y2, w2, h2 = cur[1], cur[2], cur[3], cur[4]
   local r, b, r2, b2 = x+w, y+h, x2+w2, y2+h2
   x, y = math.max(x, x2), math.max(y, y2)
   b, r = math.min(b, b2), math.min(r, r2)
   w, h = r-x, b-y
-  table.insert(core.clip_rect_stack, { x, y, w, h })
+  clip_top = clip_top + 1
+  local t = clip_pool[clip_top]
+  if not t then
+    t = { 0, 0, 0, 0 }
+    clip_pool[clip_top] = t
+  end
+  t[1], t[2], t[3], t[4] = x, y, w, h
+  core.clip_rect_stack[clip_top] = t
   renderer.set_clip_rect(x, y, w, h)
 end
 
 
 function core.pop_clip_rect()
-  table.remove(core.clip_rect_stack)
-  local x, y, w, h = table.unpack(core.clip_rect_stack[#core.clip_rect_stack])
-  renderer.set_clip_rect(x, y, w, h)
+  core.clip_rect_stack[clip_top] = nil
+  clip_top = clip_top - 1
+  local cur = core.clip_rect_stack[clip_top]
+  renderer.set_clip_rect(cur[1], cur[2], cur[3], cur[4])
 end
 
 function core.root_project() return core.projects[1] end
@@ -977,8 +993,11 @@ function core.step()
 
   -- draw
   renderer.begin_frame(core.window)
-  core.clip_rect_stack[1] = { 0, 0, width, height }
-  renderer.set_clip_rect(table.unpack(core.clip_rect_stack[1]))
+  local base_clip = clip_pool[1]
+  base_clip[1], base_clip[2], base_clip[3], base_clip[4] = 0, 0, width, height
+  core.clip_rect_stack[1] = base_clip
+  clip_top = 1
+  renderer.set_clip_rect(0, 0, width, height)
   core.root_view:draw()
   renderer.end_frame()
   return true
