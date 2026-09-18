@@ -801,10 +801,8 @@ double ren_draw_text(RenSurface *rs, RenFont **fonts, const char *text, size_t l
 double ren_draw_text_gpu(RenWindow *ren, RenFont **fonts, const char *text, size_t len, float x, int y, RenColor color, RenTab tab) {
   if (!ren || !ren->renderer) return x;
 
-  const int surface_scale = ren->rensurface.scale > 0 ? ren->rensurface.scale : 1;
-  double pen_x = x * surface_scale;
+  double pen_x = x;
   double original_pen_x = pen_x;
-  int scaled_y = y * surface_scale;
   const char* end = text + len;
 
   RenFont* last = NULL;
@@ -824,10 +822,10 @@ double ren_draw_text_gpu(RenWindow *ren, RenFont **fonts, const char *text, size
       break;
 
     int start_x = (int)floor(pen_x) + metric->bitmap_left;
-    int target_y = scaled_y - metric->bitmap_top + (fonts[0]->baseline * surface_scale);
+    int target_y = y - metric->bitmap_top + fonts[0]->baseline;
 
     if (!font_surface && !is_whitespace(codepoint)) {
-      ren_draw_rect_gpu(ren, (RenRect){ (int)((start_x + 1) / surface_scale), y, (int)(font->space_advance - 1), ren_font_group_get_height(fonts) }, color);
+      ren_draw_rect_gpu(ren, (RenRect){ start_x + 1, y, (int)(font->space_advance - 1), ren_font_group_get_height(fonts) }, color);
     } else if (!is_whitespace(codepoint) && font_surface && color.a > 0 && metric->x1 > 0 && (metric->y1 > metric->y0)) {
       SDL_Texture *tex = font_get_glyph_texture(ren, font, metric);
       if (tex) {
@@ -856,18 +854,18 @@ double ren_draw_text_gpu(RenWindow *ren, RenFont **fonts, const char *text, size
 
     if (!last) last = font;
     else if (font != last || text == end) {
-      double local_pen_x = (text == end ? pen_x + adv : pen_x) / surface_scale;
+      double local_pen_x = (text == end ? pen_x + adv : pen_x);
       if (underline)
         ren_draw_rect_gpu(ren, (RenRect){ (int)last_pen_x, y + last->height - 1, (int)(local_pen_x - last_pen_x), last->underline_thickness }, color);
       if (strikethrough)
         ren_draw_rect_gpu(ren, (RenRect){ (int)last_pen_x, y + last->height / 2, (int)(local_pen_x - last_pen_x), last->underline_thickness }, color);
       last = font;
-      last_pen_x = pen_x / surface_scale;
+      last_pen_x = pen_x;
     }
 
     pen_x += adv;
   }
-  return pen_x / surface_scale;
+  return pen_x;
 }
 
 /******************* Rectangles **********************/
@@ -910,12 +908,11 @@ void ren_draw_rect_gpu(RenWindow *ren, RenRect rect, RenColor color) {
   if (color.a == 0 || !ren || !ren->renderer) return;
   if (rect.width <= 0 || rect.height <= 0) return;
 
-  const int scale = ren->rensurface.scale > 0 ? ren->rensurface.scale : 1;
   SDL_FRect dest_rect = {
-    (float)(rect.x * scale),
-    (float)(rect.y * scale),
-    (float)(rect.width * scale),
-    (float)(rect.height * scale)
+    (float)rect.x,
+    (float)rect.y,
+    (float)rect.width,
+    (float)rect.height
   };
 
   if (color.a == 255) {
@@ -1044,7 +1041,15 @@ void ren_get_size(RenWindow *window_renderer, int *x, int *y) {
     return;
   }
   if (window_renderer->is_gpu) {
-    SDL_GetWindowSize(window_renderer->window, x, y);
+    int w = 0, h = 0;
+    if (window_renderer->renderer) {
+      SDL_GetRenderOutputSize(window_renderer->renderer, &w, &h);
+    }
+    if (w <= 0 || h <= 0) {
+      SDL_GetWindowSizeInPixels(window_renderer->window, &w, &h);
+    }
+    if (x) *x = w;
+    if (y) *y = h;
     return;
   }
   RenSurface rs = renwin_get_surface(window_renderer);

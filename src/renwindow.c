@@ -26,23 +26,6 @@ const char* renwin_get_renderer_name(RenWindow *ren) {
   return "software";
 }
 
-static int query_surface_scale(RenWindow *ren) {
-  int w_pixels, h_pixels;
-  int w_points, h_points;
-  SDL_GetWindowSizeInPixels(ren->window, &w_pixels, &h_pixels);
-  SDL_GetWindowSize(ren->window, &w_points, &h_points);
-  /* We consider that the ratio pixel/point will always be an integer and
-     it is the same along the x and the y axis. */
-  if (h_points == 0) h_points = 1;
-  if (h_pixels == 0) h_pixels = 1;
-  if (w_points == 0) w_points = 1;
-  if (w_pixels == 0) w_pixels = 1;
-
-  int scale = w_pixels / w_points;
-
-  return scale ? scale : 1;
-}
-
 static void renwin_cleanup_gpu(RenWindow *ren) {
   if (ren->texture) {
     SDL_DestroyTexture(ren->texture);
@@ -94,10 +77,10 @@ static bool renwin_init_gpu_surface(RenWindow *ren) {
     return false;
   }
   ren->is_gpu = true;
-  ren->rensurface.scale = query_surface_scale(ren);
+  ren->rensurface.scale = 1;
   ren->rensurface.surface = NULL;
   ren->texture = NULL;
-  ren->scale_x = ren->scale_y = 1;
+  renwin_update_scale(ren);
   return true;
 }
 
@@ -163,7 +146,7 @@ RenSurface renwin_get_surface(RenWindow *ren) {
 
 void renwin_resize_surface(RenWindow *ren) {
   if (ren->is_gpu) {
-    ren->rensurface.scale = query_surface_scale(ren);
+    ren->rensurface.scale = 1;
     renwin_clip_to_surface(ren);
   } else {
     renwin_init_software_surface(ren);
@@ -172,20 +155,24 @@ void renwin_resize_surface(RenWindow *ren) {
 }
 
 void renwin_update_scale(RenWindow *ren) {
-  if (!ren->is_gpu) {
+  int window_w = 0, window_h = 0;
+  SDL_GetWindowSize(ren->window, &window_w, &window_h);
+  int pix_w = 0, pix_h = 0;
+  if (ren->is_gpu && ren->renderer) {
+    SDL_GetRenderOutputSize(ren->renderer, &pix_w, &pix_h);
+  } else if (!ren->is_gpu) {
     SDL_Surface *surface = SDL_GetWindowSurface(ren->window);
-    if (!surface) {
-      fprintf(stderr, "Error getting window surface: %s\n", SDL_GetError());
-      return;
+    if (surface) {
+      pix_w = surface->w;
+      pix_h = surface->h;
     }
-    int window_w = surface->w, window_h = surface->h;
-    SDL_GetWindowSize(ren->window, &window_w, &window_h);
-    if (window_w > 0 && window_h > 0) {
-      ren->scale_x = (float)surface->w / window_w;
-      ren->scale_y = (float)surface->h / window_h;
-    } else {
-      ren->scale_x = ren->scale_y = 1;
-    }
+  }
+  if (pix_w <= 0 || pix_h <= 0) {
+    SDL_GetWindowSizeInPixels(ren->window, &pix_w, &pix_h);
+  }
+  if (window_w > 0 && window_h > 0 && pix_w > 0 && pix_h > 0) {
+    ren->scale_x = (float)pix_w / window_w;
+    ren->scale_y = (float)pix_h / window_h;
   } else {
     ren->scale_x = ren->scale_y = 1;
   }

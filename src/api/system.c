@@ -195,10 +195,12 @@ top:
       {
         GET_WINDOW_RENDERER_OR_CONTINUE(e.window.windowID);
         ren_resize_window(window_renderer);
+        rencache_invalidate();
+        int w = 0, h = 0;
+        ren_get_size(window_renderer, &w, &h);
         lua_pushstring(L, "resized");
-        /* The size below will be in points. */
-        lua_pushinteger(L, e.window.data1);
-        lua_pushinteger(L, e.window.data2);
+        lua_pushinteger(L, w);
+        lua_pushinteger(L, h);
         return 3;
       }
 
@@ -411,6 +413,7 @@ top:
       {
         GET_WINDOW_RENDERER_OR_CONTINUE(e.window.windowID);
         ren_resize_window(window_renderer);
+        rencache_invalidate();
         lua_pushstring(L, "displayscalechanged");
         lua_pushnumber(L, SDL_GetWindowDisplayScale(window_renderer->window));
         return 2;
@@ -418,12 +421,16 @@ top:
 
     case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
       {
-        RenWindow* window_renderer = ren_find_window_from_id(e.window.windowID);
-        if (window_renderer) {
-          ren_resize_window(window_renderer);
-        }
+        GET_WINDOW_RENDERER_OR_CONTINUE(e.window.windowID);
+        ren_resize_window(window_renderer);
+        rencache_invalidate();
+        int w = 0, h = 0;
+        ren_get_size(window_renderer, &w, &h);
+        lua_pushstring(L, "resized");
+        lua_pushinteger(L, w);
+        lua_pushinteger(L, h);
+        return 3;
       }
-      goto top;
 
     default:
       // Custom event types are higher than SDL_EVENT_USER
@@ -554,6 +561,7 @@ static int f_set_window_size(lua_State *L) {
   SDL_SetWindowSize(window_renderer->window, w, h);
   SDL_SetWindowPosition(window_renderer->window, x, y);
   ren_resize_window(window_renderer);
+  rencache_invalidate();
   return 0;
 }
 
