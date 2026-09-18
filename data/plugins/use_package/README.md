@@ -25,6 +25,38 @@ All calls to `up.repos{}` and `up.use()` must appear after this line.
 
 ---
 
+## Startup Options
+
+`use_package` can automatically install missing plugins and pull updates on startup in the background without blocking the editor:
+
+| Option | Type | Default | Description |
+|---|---|---|---|
+| `auto_install` | boolean | `false` | Automatically install any declared plugins that are missing on startup. |
+| `auto_update` | boolean | `false` | Automatically pull updates for installed plugins (and `use_package` itself) from registered repositories and git remotes on startup. |
+
+Configure these options in `init.lua` using any of the following methods:
+
+```lua
+local up = require 'plugins.use_package'
+
+-- Method 1: standard Lite-XL config table
+local config = require 'core.config'
+config.plugins.use_package.auto_install = true
+config.plugins.use_package.auto_update  = true
+
+-- Method 2: up.setup
+up.setup {
+  auto_install = true,
+  auto_update  = true,
+}
+
+-- Method 3: direct property assignment
+up.auto_install = true
+up.auto_update  = true
+```
+
+---
+
 ## `up.repos(list)`
 
 Register one or more multi-plugin repository URLs or local directory paths. Each entry

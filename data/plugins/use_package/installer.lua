@@ -161,6 +161,16 @@ function M.fromRepo(spec)
     local addon, hex = manifestlib.searchAddon(spec.name, search_hex)
 
     if not addon then
+      local ok_up, up = pcall(require, 'plugins.use_package')
+      if ok_up and up.getRepos then
+        for _, r in ipairs(up.getRepos()) do
+          manifestlib.updateRepo(r)
+        end
+        addon, hex = manifestlib.searchAddon(spec.name, search_hex)
+      end
+    end
+
+    if not addon then
       promise:reject(string.format(
         '[use-package] no addon "%s" found in any registered repo', spec.name))
       return
@@ -190,7 +200,17 @@ function M.fromRepo(spec)
       return
     end
 
-    local repo_dir = manifestlib.repoLocalDir(util.dehexify(hex))
+    local repo_url = util.dehexify(hex)
+    local repo_dir = manifestlib.repoLocalDir(repo_url)
+    if not util.fileExists(repo_dir) and not util.isLocalPath(repo_url) then
+      local out, code = manifestlib.downloadRepo(repo_url)
+      if code ~= 0 then
+        promise:reject(string.format(
+          '[use-package] failed to download repo %s: %s', repo_url, out))
+        return
+      end
+    end
+
     if util.isLocalPath(repo_dir) then
       local ok, err = M.linkAddonSync(addon, hex)
       if ok then
@@ -270,11 +290,18 @@ end
 function M.updateRepo(spec)
   local promise = Promise.new()
   core.add_thread(function()
-    local stored = require('plugins.use_package.store').getPlugin(spec.plugin)
+    local store = require('plugins.use_package.store')
+    local stored = store.getPlugin(spec.plugin)
     if not stored or not stored.repo_hex then
-      promise:reject(string.format(
-        '[use-package] no cached repo info for "%s"', spec.name))
-      return
+      local addon, hex = manifestlib.searchAddon(spec.name)
+      if hex then
+        stored = { plugin = spec.plugin, name = spec.name, repo_hex = hex, installMethod = 'repo', fullyInstalled = true }
+        store.addPlugin(stored)
+      else
+        promise:reject(string.format(
+          '[use-package] no cached repo info for "%s"', spec.name))
+        return
+      end
     end
 
     local repo_url = util.dehexify(stored.repo_hex)

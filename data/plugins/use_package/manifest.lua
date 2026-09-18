@@ -61,6 +61,7 @@ function M.downloadRepo(repo)
 end
 
 -- Pull the latest changes for an already-cloned repo, then re-cache the manifest.
+-- If repo is not yet cloned, downloads it first.
 -- For local paths, simply refreshes the cached manifest.
 function M.updateRepo(repo)
   local url = util.repoURL(repo)
@@ -69,7 +70,14 @@ function M.updateRepo(repo)
     return '', 0
   end
   local dir = repoLocalDir(repo)
+  if not util.fileExists(dir) then
+    return M.downloadRepo(repo)
+  end
+  local tag = util.repoTag(repo)
   local out, code = util.gitCmd({'pull'}, dir)
+  if tag and code == 0 then
+    util.gitCmd({'checkout', tag}, dir)
+  end
   if code == 0 then
     updateManifestCache(repo)
   end
